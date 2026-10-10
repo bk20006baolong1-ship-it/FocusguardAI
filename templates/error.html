@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="vi" data-bs-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} · FocusGuard</title>
+  <script>
+    (function () { try { var t = localStorage.getItem("fg-theme"); if (t === "dark" || t === "light") document.documentElement.setAttribute("data-bs-theme", t); } catch (e) {} })();
+  </script>
+  <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/all.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
+</head>
+<body>
+<main class="fg-center-page">
+  <div class="fg-card" style="max-width: 460px; width: 100%;">
+    <div class="fg-state{% if code >= 500 %} is-error{% endif %}">
+      <div class="fg-state-icon">
+        <i class="fa-solid {% if code == 404 %}fa-magnifying-glass{% elif code == 403 %}fa-lock{% else %}fa-triangle-exclamation{% endif %}" aria-hidden="true"></i>
+      </div>
+      <p class="fg-caption mb-0">Mã lỗi {{ code }}</p>
+      <h1 class="fg-page-title">{{ title }}</h1>
+      <p class="fg-state-text">{{ message }}</p>
+      <div class="fg-row justify-content-center mt-3">
+        {% if logged_in %}
+        <a class="btn btn-primary" href="{{ url_for('index') }}"><i class="fa-solid fa-house" aria-hidden="true"></i>Về trang chính</a>
+        {% else %}
+        <a class="btn btn-primary" href="{{ url_for('login') }}"><i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i>Đăng nhập</a>
+        {% endif %}
+        {% if code >= 500 %}
+        <a class="btn btn-secondary" href=""><i class="fa-solid fa-rotate-right" aria-hidden="true"></i>Thử lại</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</main>
+</body>
+</html>

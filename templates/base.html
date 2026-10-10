@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="vi" data-bs-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}FocusGuard{% endblock %} · FocusGuard</title>
+  <script>
+    /* apply the saved theme before first paint */
+    (function () { try { var t = localStorage.getItem("fg-theme"); if (t === "dark" || t === "light") document.documentElement.setAttribute("data-bs-theme", t); } catch (e) {} })();
+  </script>
+  <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/all.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<a class="fg-skip-link" href="#fgContent">Bỏ qua điều hướng</a>
+
+{% set nav = {
+  'student': [
+    ('index', 'dashboard', 'fa-house', 'Phiên học'),
+    ('stats', 'stats', 'fa-chart-line', 'Thống kê'),
+    ('reports', 'reports', 'fa-clock-rotate-left', 'Lịch sử'),
+    ('settings', 'settings', 'fa-gear', 'Cài đặt'),
+  ],
+  'teacher': [
+    ('teacher_dashboard', 'dashboard', 'fa-chalkboard-user', 'Giám sát'),
+    ('teacher_students', 'students', 'fa-user-group', 'Học sinh'),
+    ('teacher_attendance', 'attendance', 'fa-clipboard-check', 'Điểm danh'),
+    ('teacher_alerts', 'alerts', 'fa-bell', 'Cảnh báo'),
+    ('teacher_analytics', 'analytics', 'fa-chart-column', 'Phân tích'),
+    ('teacher_reports', 'reports', 'fa-clock-rotate-left', 'Lịch sử buổi học'),
+    ('teacher_settings', 'settings', 'fa-gear', 'Cài đặt'),
+  ],
+  'parent': [
+    ('parent_dashboard', 'dashboard', 'fa-house', 'Tổng quan'),
+  ],
+  'admin': [
+    ('admin_accounts', 'accounts', 'fa-user-shield', 'Tài khoản'),
+    ('admin_classes_page', 'classes', 'fa-school', 'Lớp học'),
+  ],
+} %}
+
+<div class="fg-app" id="fgApp">
+  <aside class="fg-sidebar" id="fgSidebar" aria-label="Điều hướng chính">
+    <a class="fg-brand" href="{{ url_for('index') }}">
+      <span class="fg-brand-mark"><i class="fa-solid fa-eye" aria-hidden="true"></i></span>
+      <span>
+        <span class="fg-brand-name d-block">FocusGuard</span>
+        <span class="fg-brand-sub d-block">{{ shell_role_label }}</span>
+      </span>
+    </a>
+    <nav>
+      <ul class="fg-nav">
+        {% for endpoint, key, icon, label in nav.get(shell_role, []) %}
+        <li>
+          <a class="fg-nav-link{% if active_tab == key %} is-active{% endif %}" href="{{ url_for(endpoint) }}"
+             {% if active_tab == key %}aria-current="page"{% endif %}>
+            <i class="fa-solid {{ icon }}" aria-hidden="true"></i><span>{{ label }}</span>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </nav>
+    <div class="fg-sidebar-foot">
+      <p class="fg-privacy-note mb-0">
+        <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+        <span>Hình ảnh camera được phân tích trực tiếp, không ghi hình và không lưu ảnh.</span>
+      </p>
+    </div>
+  </aside>
+  <div class="fg-backdrop" id="fgBackdrop"></div>
+
+  <div class="fg-main">
+    <header class="fg-topbar">
+      <button type="button" class="fg-icon-btn fg-only-mobile" id="fgNavBtn" aria-label="Mở menu điều hướng"
+              aria-controls="fgSidebar" aria-expanded="false">
+        <i class="fa-solid fa-bars" aria-hidden="true"></i>
+      </button>
+      <div class="fg-topbar-context">
+        <h1 class="fg-topbar-title">{% block page_title %}FocusGuard{% endblock %}</h1>
+        {% block topbar_context %}{% endblock %}
+      </div>
+      <div class="fg-topbar-spacer"></div>
+      <div class="fg-topbar-actions">
+        <span class="fg-pill" id="fgConn" role="status" aria-live="polite" hidden></span>
+        <button type="button" class="fg-icon-btn" id="fgThemeBtn" aria-label="Đổi giao diện sáng/tối">
+          <i class="fa-solid fa-moon" aria-hidden="true"></i>
+        </button>
+        <div class="dropdown">
+          <button type="button" class="btn btn-secondary fg-user" data-bs-toggle="dropdown" aria-expanded="false"
+                  aria-label="Tài khoản {{ shell_name }}">
+            <span class="fg-avatar" aria-hidden="true">{{ (shell_name or '?')[:1]|upper }}</span>
+            <span class="fg-user-text text-start">
+              <span class="fg-user-name d-block" data-fg-user-name>{{ shell_name }}</span>
+              <span class="fg-user-role d-block">{{ shell_role_label }}</span>
+            </span>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><span class="dropdown-item-text fg-caption">Đăng nhập với tên <strong>{{ shell_name }}</strong></span></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="{{ url_for('logout') }}"><i class="fa-solid fa-right-from-bracket me-2" aria-hidden="true"></i>Đăng xuất</a></li>
+          </ul>
+        </div>
+      </div>
+    </header>
+
+    <main class="fg-page" id="fgContent" tabindex="-1">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+<div class="fg-toast-region" id="fgToasts" aria-live="polite" aria-atomic="false"></div>
+
+<div class="modal fade" id="fgConfirm" tabindex="-1" aria-labelledby="fgConfirmTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title" id="fgConfirmTitle" data-fg-confirm-title></h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2" data-fg-confirm-body></p>
+        <ul class="fg-caption mb-0 ps-3" data-fg-confirm-list hidden></ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-primary" data-fg-confirm-ok>Xác nhận</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% block modals %}{% endblock %}
+
+<script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/core.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

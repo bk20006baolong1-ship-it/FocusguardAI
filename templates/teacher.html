@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+{% set titles = {
+  'dashboard': 'Giám sát lớp học', 'students': 'Học sinh', 'attendance': 'Điểm danh', 'alerts': 'Cảnh báo',
+  'analytics': 'Phân tích', 'reports': 'Lịch sử buổi học', 'settings': 'Cài đặt'
+} %}
+{% block title %}{{ titles[active_tab] }}{% endblock %}
+{% block page_title %}{{ titles[active_tab] }}{% endblock %}
+
+{% block topbar_context %}
+  {% if teacher_classes|length > 1 %}
+  <label class="fg-sr-only" for="classSelect">Chọn lớp</label>
+  <select class="form-select fg-select-inline" id="classSelect">
+    {% for c in teacher_classes %}
+    <option value="{{ c.id }}" {% if c.id == current_class_id %}selected{% endif %}>{{ c.class_name }}</option>
+    {% endfor %}
+  </select>
+  {% elif current_class_id %}
+  <span class="fg-pill fg-hide-mobile"><i class="fa-solid fa-school" aria-hidden="true"></i>{{ class_name }}</span>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% if not current_class_id %}
+<div class="fg-card">
+  <div class="fg-state">
+    <div class="fg-state-icon"><i class="fa-solid fa-school" aria-hidden="true"></i></div>
+    <p class="fg-state-title">Bạn chưa được phân công lớp nào</p>
+    <p class="fg-state-text">Hãy liên hệ quản trị viên để được gán lớp. Sau đó tải lại trang này.</p>
+  </div>
+</div>
+{% else %}
+<div id="teacherPage" data-page="{{ active_tab }}" class="fg-stack">
+
+  {# Shown on every page except Giám sát while a class session is running. #}
+  {% if active_tab != 'dashboard' %}
+  <div class="fg-banner" data-tone="info" id="liveStrip" hidden role="status">
+    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+    <div class="flex-grow-1">
+      <div class="fg-banner-title">Buổi học đang diễn ra · <span class="fg-num" data-live-timer>00:00</span></div>
+      <div data-live-note></div>
+    </div>
+    <a class="btn btn-primary btn-sm" href="{{ url_for('teacher_dashboard') }}">Về trang Giám sát</a>
+  </div>
+  {% endif %}
+
+  {# ───────────────────────────── Giám sát ───────────────────────────── #}
+  {% if active_tab == 'dashboard' %}
+  <section class="fg-card" aria-label="Buổi học">
+    <div class="fg-session">
+      <div class="fg-session-state">
+        <span class="fg-live-dot is-idle" id="sessionDot" aria-hidden="true"></span>
+        <div class="min-w-0">
+          <div class="fg-session-title" id="sessionTitle">Đang tải trạng thái buổi học…</div>
+          <div class="fg-session-meta" id="sessionMeta">Lớp {{ class_name }}</div>
+        </div>
+      </div>
+      <div class="fg-tabs" role="group" aria-label="Hình thức buổi học" id="modeTabs">
+        <button type="button" class="fg-tab" data-mode="classroom" aria-pressed="true">
+          <i class="fa-solid fa-video" aria-hidden="true"></i>Camera lớp học
+        </button>
+        <button type="button" class="fg-tab" data-mode="online" aria-pressed="false">
+          <i class="fa-solid fa-desktop" aria-hidden="true"></i>Lớp trực tuyến
+        </button>
+      </div>
+      <div class="fg-session-timer" id="sessionTimer" aria-label="Thời gian buổi học" hidden>00:00</div>
+      <button type="button" class="btn btn-primary btn-lg" id="startBtn" disabled>
+        <i class="fa-solid fa-play" aria-hidden="true"></i>Bắt đầu buổi học
+      </button>
+      <button type="button" class="btn btn-danger btn-lg" id="stopBtn" hidden>
+        <i class="fa-solid fa-stop" aria-hidden="true"></i>Kết thúc buổi học
+      </button>
+    </div>
+    <div class="fg-card-footer" id="modeHelp">
+      Camera lớp học: một camera đặt trong lớp quan sát cả lớp. Lớp trực tuyến: mỗi học sinh tự bật camera trên máy của mình.
+    </div>
+  </section>
+
+  <section class="fg-grid fg-grid-metrics" aria-label="Tổng quan buổi học">
+    <div class="fg-card fg-metric">
+      <span class="fg-metric-label"><i class="fa-solid fa-user-check" aria-hidden="true"></i>Có mặt</span>
+      <span class="fg-metric-value" id="mPresent">—</span>
+      <span class="fg-metric-sub" id="mPresentSub">Chưa bắt đầu buổi học</span>
+    </div>
+    <div class="fg-card fg-metric">
+      <span class="fg-metric-label">
+        <i class="fa-solid fa-chart-line" aria-hidden="true"></i>Điểm tập trung trung bình
+        <button type="button" class="fg-info-btn" data-bs-toggle="tooltip" data-bs-placement="top"
+                aria-label="Cách tính điểm tập trung"
+                title="Điểm được tính từ các hành vi quan sát được theo thời gian. Chỉ tính cho học sinh đang được camera nhìn thấy. Đây là chỉ số tham khảo, không phải đánh giá năng lực.">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+        </button>
+      </span>
+      <span class="fg-metric-value" id="mScore">—</span>
+      <span class="fg-metric-sub" id="mScoreSub">Chưa có dữ liệu</span>
+    </div>
+    <div class="fg-card fg-metric">
+      <span class="fg-metric-label"><i class="fa-solid fa-bell" aria-hidden="true"></i>Cần chú ý</span>
+      <span class="fg-metric-value" id="mAttention">—</span>
+      <span class="fg-metric-sub" id="mAttentionSub">Chưa có dữ liệu</span>
+    </div>
+    <div class="fg-card fg-metric">
+      <span class="fg-metric-label"><i class="fa-solid fa-eye" aria-hidden="true"></i><span id="mVisibleLabel">Đang trong khung hình</span></span>
+      <span class="fg-metric-value" id="mVisible">—</span>
+      <span class="fg-metric-sub" id="mVisibleSub">Chưa có dữ liệu</span>
+    </div>
+  </section>
+
+  <div class="fg-grid fg-grid-main">
+    <div class="fg-stack">
+      <section class="fg-card" aria-labelledby="attentionTitle">
+        <div class="fg-card-header">
+          <h2 class="fg-card-title" id="attentionTitle">Cần chú ý ngay</h2>
+          <span class="fg-caption" id="attentionCount"></span>
+        </div>
+        <div class="fg-card-body is-flush" id="attentionList" aria-live="polite"></div>
+      </section>
+
+      <section class="fg-card" aria-labelledby="studentsTitle">
+        <div class="fg-card-header">
+          <h2 class="fg-card-title" id="studentsTitle">Học sinh trong lớp</h2>
+          <div class="fg-tabs" role="group" aria-label="Lọc học sinh" id="studentFilter">
+            <button type="button" class="fg-tab is-active" data-filter="all" aria-pressed="true">Tất cả</button>
+            <button type="button" class="fg-tab" data-filter="attention" aria-pressed="false">Cần chú ý</button>
+            <button type="button" class="fg-tab" data-filter="missing" aria-pressed="false">Chưa thấy</button>
+          </div>
+        </div>
+        <div id="studentGrid"></div>
+      </section>
+    </div>
+
+    <div class="fg-stack">
+      <section class="fg-card" aria-labelledby="cameraTitle" id="cameraCard">
+        <div class="fg-card-header">
+          <h2 class="fg-card-title" id="cameraTitle">Camera lớp học</h2>
+          <span class="fg-badge" id="cameraBadge" data-tone="neutral"><i class="fa-solid fa-video-slash" aria-hidden="true"></i>Chưa bật</span>
+        </div>
+        <div class="fg-card-body">
+          <div class="fg-camera">
+            <img id="cameraFeed" alt="Hình ảnh trực tiếp từ camera lớp học" hidden>
+            <div class="fg-camera-state" id="cameraState">
+              <i class="fa-solid fa-video-slash" aria-hidden="true"></i>
+              <div class="fg-camera-state-title">Camera chưa bật</div>
+              <p class="fg-camera-state-text">Bắt đầu buổi học ở chế độ Camera lớp học để bật camera.</p>
+            </div>
+          </div>
+          <p class="fg-helper mb-0"><i class="fa-solid fa-shield-halved me-1" aria-hidden="true"></i>Hình ảnh được phân tích trực tiếp, không ghi hình và không lưu ảnh.</p>
+        </div>
+      </section>
+
+      <section class="fg-card" aria-labelledby="logTitle">
+        <div class="fg-card-header">
+          <h2 class="fg-card-title" id="logTitle">Hoạt động gần đây</h2>
+          <a class="btn btn-link btn-sm" href="{{ url_for('teacher_alerts') }}">Xem tất cả</a>
+        </div>
+        <div class="fg-card-body is-flush fg-scroll" id="logList"></div>
+      </section>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ───────────────────────────── Học sinh ───────────────────────────── #}
+  {% if active_tab == 'students' %}
+  <section class="fg-card" aria-labelledby="rosterTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="rosterTitle">Danh sách lớp {{ class_name }}</h2>
+        <p class="fg-caption mb-0" id="rosterSub">Chọn một học sinh để xem chi tiết.</p>
+      </div>
+      <div style="min-width: min(280px, 100%);">
+        <label class="fg-sr-only" for="rosterSearch">Tìm học sinh theo tên</label>
+        <input type="search" class="form-control" id="rosterSearch" placeholder="Tìm theo tên học sinh">
+      </div>
+    </div>
+    <div class="fg-card-body is-flush" id="rosterBody"></div>
+  </section>
+  {% endif %}
+
+  {# ───────────────────────────── Điểm danh ───────────────────────────── #}
+  {% if active_tab == 'attendance' %}
+  <section class="fg-grid fg-grid-metrics" aria-label="Tổng hợp điểm danh">
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Sĩ số</span><span class="fg-metric-value" id="aEnrolled">—</span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Có mặt</span><span class="fg-metric-value" id="aPresent">—</span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Đi muộn</span><span class="fg-metric-value" id="aLate">—</span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label" id="aAbsentLabel">Vắng mặt</span><span class="fg-metric-value" id="aAbsent">—</span></div>
+  </section>
+  <section class="fg-card" aria-labelledby="attTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="attTitle">Điểm danh</h2>
+        <p class="fg-caption mb-0" id="attSub"></p>
+      </div>
+      <div class="fg-row">
+        <label class="fg-sr-only" for="attSession">Chọn buổi học</label>
+        <select class="form-select fg-select-inline" id="attSession" style="min-width: 220px;"></select>
+        <button type="button" class="btn btn-secondary" id="attExport" disabled>
+          <i class="fa-solid fa-download" aria-hidden="true"></i>Tải CSV
+        </button>
+      </div>
+    </div>
+    <div class="fg-card-body is-flush" id="attBody"></div>
+    <div class="fg-card-footer">Điểm danh dựa trên việc camera nhận ra học sinh. Giáo viên nên đối chiếu lại khi cần.</div>
+  </section>
+  {% endif %}
+
+  {# ───────────────────────────── Cảnh báo ───────────────────────────── #}
+  {% if active_tab == 'alerts' %}
+  <section class="fg-card" aria-labelledby="alertsTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="alertsTitle">Nhật ký buổi học đang diễn ra</h2>
+        <p class="fg-caption mb-0" id="alertsSub"></p>
+      </div>
+      <div class="fg-tabs" role="group" aria-label="Lọc nhật ký" id="alertFilter">
+        <button type="button" class="fg-tab is-active" data-filter="all" aria-pressed="true">Tất cả</button>
+        <button type="button" class="fg-tab" data-filter="behavior" aria-pressed="false">Hành vi</button>
+        <button type="button" class="fg-tab" data-filter="attendance" aria-pressed="false">Điểm danh</button>
+      </div>
+    </div>
+    <div class="fg-card-body is-flush" id="alertsBody" aria-live="polite"></div>
+    <div class="fg-card-footer">Nhật ký hiển thị 50 hoạt động gần nhất của buổi học đang diễn ra. Các buổi đã kết thúc xem ở Lịch sử buổi học.</div>
+  </section>
+  {% endif %}
+
+  {# ───────────────────────────── Phân tích ───────────────────────────── #}
+  {% if active_tab == 'analytics' %}
+  <section class="fg-grid fg-grid-metrics" aria-label="Chỉ số tổng hợp">
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Buổi học đã ghi nhận</span><span class="fg-metric-value" id="anSessions">—</span><span class="fg-metric-sub">Các buổi đã kết thúc</span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Điểm trung bình các buổi</span><span class="fg-metric-value" id="anAverage">—</span><span class="fg-metric-sub" id="anAverageSub"></span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Khung giờ điểm thấp nhất</span><span class="fg-metric-value" id="anHour" style="font-size: 1.25rem;">—</span><span class="fg-metric-sub" id="anHourSub"></span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Sự kiện đã ghi nhận</span><span class="fg-metric-value" id="anEvents">—</span><span class="fg-metric-sub">Tổng các buổi</span></div>
+  </section>
+  <div class="fg-grid fg-grid-2">
+    <section class="fg-card" aria-labelledby="trendTitle">
+      <div class="fg-card-header"><h2 class="fg-card-title" id="trendTitle">Điểm tập trung trung bình theo buổi</h2></div>
+      <div class="fg-card-body" id="trendBody"><div class="fg-chart"><canvas id="trendChart" role="img" aria-label="Biểu đồ điểm tập trung trung bình theo buổi học"></canvas></div></div>
+    </section>
+    <section class="fg-card" aria-labelledby="breakdownTitle">
+      <div class="fg-card-header"><h2 class="fg-card-title" id="breakdownTitle">Hành vi được ghi nhận</h2></div>
+      <div class="fg-card-body" id="breakdownBody"><div class="fg-chart"><canvas id="breakdownChart" role="img" aria-label="Biểu đồ số lần ghi nhận từng hành vi"></canvas></div></div>
+    </section>
+    <section class="fg-card" aria-labelledby="watchTitle">
+      <div class="fg-card-header">
+        <div>
+          <h2 class="fg-card-title" id="watchTitle">Học sinh cần quan tâm thêm</h2>
+          <p class="fg-caption mb-0">Điểm trung bình dưới 70 trong ít nhất 2 buổi đã đo.</p>
+        </div>
+      </div>
+      <div class="fg-card-body is-flush" id="watchBody"></div>
+    </section>
+    <section class="fg-card" aria-labelledby="leaderTitle">
+      <div class="fg-card-header">
+        <div>
+          <h2 class="fg-card-title" id="leaderTitle">Điểm trung bình hôm nay</h2>
+          <p class="fg-caption mb-0">Tính trên các buổi học đã kết thúc trong ngày.</p>
+        </div>
+      </div>
+      <div class="fg-card-body is-flush" id="leaderBody"></div>
+    </section>
+  </div>
+  <p class="fg-helper">Số liệu lấy từ các buổi học đã ghi nhận của lớp. Chưa có số liệu đánh giá độ chính xác trên dữ liệu thực tế của trường.</p>
+  {% endif %}
+
+  {# ───────────────────────────── Lịch sử buổi học ───────────────────────────── #}
+  {% if active_tab == 'reports' %}
+  <section class="fg-card" aria-labelledby="historyTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="historyTitle">Các buổi học đã kết thúc</h2>
+        <p class="fg-caption mb-0">Chọn một buổi để xem chi tiết, in hoặc tải về.</p>
+      </div>
+    </div>
+    <div class="fg-card-body is-flush" id="historyBody"></div>
+  </section>
+  {% endif %}
+
+  {# ───────────────────────────── Cài đặt ───────────────────────────── #}
+  {% if active_tab == 'settings' %}
+  <div class="fg-grid fg-grid-2">
+    <section class="fg-card" aria-labelledby="profileTitle">
+      <div class="fg-card-header"><h2 class="fg-card-title" id="profileTitle">Thông tin giáo viên</h2></div>
+      <div class="fg-card-body">
+        <form id="settingsForm" novalidate>
+          <div class="fg-field">
+            <label class="form-label fg-required" for="displayName">Tên hiển thị</label>
+            <input type="text" class="form-control" id="displayName" maxlength="80" value="{{ teacher_name }}" required aria-describedby="displayNameError">
+            <div class="fg-error-text" id="displayNameError" hidden>Tên hiển thị không được để trống.</div>
+          </div>
+          <div class="fg-field">
+            <label class="form-label" for="minFocus">Ngưỡng điểm cần chú ý</label>
+            <input type="number" class="form-control" id="minFocus" min="0" max="100" step="1" value="{{ min_focus_threshold }}" aria-describedby="minFocusHelp">
+            <div class="fg-helper" id="minFocusHelp">Học sinh có điểm tập trung dưới ngưỡng này sẽ xuất hiện trong mục Cần chú ý. Giá trị từ 0 đến 100. Ngưỡng áp dụng cho đến khi máy chủ khởi động lại.</div>
+          </div>
+          <button type="submit" class="btn btn-primary" id="settingsSave">Lưu thay đổi</button>
+        </form>
+      </div>
+    </section>
+    <section class="fg-card" aria-labelledby="thresholdTitle">
+      <div class="fg-card-header">
+        <div>
+          <h2 class="fg-card-title" id="thresholdTitle">Cách hệ thống ghi nhận hành vi</h2>
+          <p class="fg-caption mb-0">Do quản trị viên cấu hình. Giáo viên chỉ xem.</p>
+        </div>
+      </div>
+      <div class="fg-card-body" id="thresholdBody"></div>
+    </section>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block modals %}
+{% if current_class_id %}
+<div class="offcanvas offcanvas-end" tabindex="-1" id="studentPanel" aria-labelledby="studentPanelTitle" style="width: min(440px, 100vw);">
+  <div class="offcanvas-header">
+    <h2 class="fg-section-title" id="studentPanelTitle">Chi tiết học sinh</h2>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Đóng"></button>
+  </div>
+  <div class="offcanvas-body" id="studentPanelBody"></div>
+</div>
+
+<div class="modal fade" id="sessionModal" tabindex="-1" aria-labelledby="sessionModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title" id="sessionModalTitle">Tổng kết buổi học</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body" id="sessionModalBody"></div>
+      <div class="modal-footer no-print">
+        <button type="button" class="btn btn-secondary" id="sessionCsv"><i class="fa-solid fa-download" aria-hidden="true"></i>Tải CSV</button>
+        <button type="button" class="btn btn-secondary" id="sessionPrint"><i class="fa-solid fa-print" aria-hidden="true"></i>In</button>
+        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if current_class_id %}
+<script type="application/json" id="fgBoot">{{ {
+  'class_id': current_class_id, 'class_name': class_name, 'page': active_tab,
+  'min_focus_threshold': min_focus_threshold,
+  'dashboard_url': url_for('teacher_dashboard')
+}|tojson }}</script>
+<script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+{% if active_tab == 'analytics' %}<script src="{{ url_for('static', filename='js/chart.js') }}"></script>{% endif %}
+<script src="{{ url_for('static', filename='js/teacher.js') }}"></script>
+{% endif %}
+{% endblock %}

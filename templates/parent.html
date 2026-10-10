@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% set active_tab = 'dashboard' %}
+{% block title %}Tổng quan{% endblock %}
+{% block page_title %}Tổng quan{% endblock %}
+
+{% block content %}
+{% if not linked %}
+<div class="fg-card">
+  <div class="fg-state">
+    <div class="fg-state-icon"><i class="fa-solid fa-link-slash" aria-hidden="true"></i></div>
+    <p class="fg-state-title">Tài khoản chưa được liên kết với học sinh</p>
+    <p class="fg-state-text">Hãy liên hệ quản trị viên của trường để liên kết tài khoản phụ huynh với con của bạn.</p>
+  </div>
+</div>
+{% else %}
+<div class="fg-stack" id="parentPage">
+  <div class="fg-page-header mb-0">
+    <div>
+      <h2 class="fg-page-title">Kết quả học tập của {{ student_name }}</h2>
+      <p class="fg-page-sub">Số liệu lấy từ các phiên học đã được ghi nhận. Đây là thông tin tham khảo để đồng hành cùng con.</p>
+    </div>
+  </div>
+
+  <section class="fg-card" aria-labelledby="liveTitle">
+    <div class="fg-card-header">
+      <h2 class="fg-card-title" id="liveTitle">Hiện tại</h2>
+      <span id="liveBadge"></span>
+    </div>
+    <div class="fg-card-body" id="liveBody" aria-live="polite">
+      <p class="mb-0 fg-muted">Con hiện không có phiên học nào đang diễn ra trên máy.</p>
+    </div>
+  </section>
+
+  <section class="fg-grid fg-grid-metrics" aria-label="Tổng quan">
+    <div class="fg-card fg-metric">
+      <span class="fg-metric-label"><i class="fa-solid fa-clock" aria-hidden="true"></i>Tổng thời gian học</span>
+      {% if profile_stats.total_sessions %}
+      <span class="fg-metric-value" style="font-size: 1.375rem;">{{ (profile_stats.total_duration_seconds // 3600)|int }} giờ {{ ((profile_stats.total_duration_seconds % 3600) // 60)|int }} phút</span>
+      {% else %}
+      <span class="fg-metric-value is-na">Chưa có</span>
+      {% endif %}
+      <span class="fg-metric-sub">{{ profile_stats.total_sessions }} phiên đã hoàn thành</span>
+    </div>
+    <div class="fg-card fg-metric">
+      <span class="fg-metric-label">
+        <i class="fa-solid fa-chart-line" aria-hidden="true"></i>Điểm tập trung trung bình
+        <button type="button" class="fg-info-btn" data-bs-toggle="tooltip" aria-label="Cách tính điểm tập trung"
+                title="Điểm được tính từ các hành vi quan sát được theo thời gian. Đây là chỉ số tham khảo, không phải đánh giá năng lực.">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+        </button>
+      </span>
+      {% if profile_stats.average_focus_score is not none %}
+      <span class="fg-metric-value">{{ profile_stats.average_focus_score }}<span class="fg-caption">/100</span></span>
+      {% else %}
+      <span class="fg-metric-value is-na">Chưa có</span>
+      {% endif %}
+      <span class="fg-metric-sub">
+        {% if profile_stats.trend == 'up' %}Xu hướng đang tăng
+        {% elif profile_stats.trend == 'down' %}Xu hướng đang giảm
+        {% elif profile_stats.trend == 'stable' %}Xu hướng ổn định
+        {% else %}Chưa đủ dữ liệu để xem xu hướng{% endif %}
+      </span>
+    </div>
+    <div class="fg-card fg-metric">
+      <span class="fg-metric-label"><i class="fa-solid fa-user-check" aria-hidden="true"></i>Chuyên cần</span>
+      {% if attendance_summary %}
+      <span class="fg-metric-value">{{ attendance_summary.rate }}%</span>
+      <span class="fg-metric-sub">Có mặt {{ attendance_summary.attended }}/{{ attendance_summary.total }} buổi học</span>
+      {% else %}
+      <span class="fg-metric-value is-na">Chưa có</span>
+      <span class="fg-metric-sub">Lớp chưa có buổi học nào đã kết thúc</span>
+      {% endif %}
+    </div>
+    <div class="fg-card fg-metric">
+      <span class="fg-metric-label"><i class="fa-solid fa-person-walking-arrow-right" aria-hidden="true"></i>Rời chỗ trong giờ học</span>
+      {% if attendance_summary %}
+      <span class="fg-metric-value">{{ attendance_summary.away_count }} <span class="fg-caption">lần</span></span>
+      <span class="fg-metric-sub">Tổng các buổi học trên lớp</span>
+      {% else %}
+      <span class="fg-metric-value is-na">Chưa có</span>
+      <span class="fg-metric-sub">Chưa có dữ liệu</span>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="fg-card" aria-labelledby="recoTitle">
+    <div class="fg-card-header"><h2 class="fg-card-title" id="recoTitle">Khung giờ con học tốt nhất</h2></div>
+    <div class="fg-card-body">
+      {% if recommendations and recommendations.best_time_range %}
+      <div class="fg-row">
+        <span class="fg-tone-icon" data-tone="primary"><i class="fa-solid fa-clock" aria-hidden="true"></i></span>
+        <div>
+          <div class="fg-section-title">{{ recommendations.best_time_range }}</div>
+          <div class="fg-caption">{{ recommendations.text }}</div>
+        </div>
+      </div>
+      {% else %}
+      <div class="fg-state is-compact">
+        <div class="fg-state-icon"><i class="fa-solid fa-clock" aria-hidden="true"></i></div>
+        <p class="fg-state-title">Chưa đủ dữ liệu để gợi ý</p>
+        <p class="fg-state-text">{{ recommendations.text if recommendations else 'Gợi ý xuất hiện sau khi con có vài phiên học đã hoàn thành.' }}</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="fg-grid fg-grid-2">
+    <section class="fg-card" aria-labelledby="compTitle">
+      <div class="fg-card-header"><h2 class="fg-card-title" id="compTitle">Điểm các phiên học gần đây</h2></div>
+      <div class="fg-card-body" id="compBody">
+        {% if not comparison %}
+        <div class="fg-state is-compact">
+          <div class="fg-state-icon"><i class="fa-solid fa-chart-line" aria-hidden="true"></i></div>
+          <p class="fg-state-title">Chưa có phiên học nào có điểm</p>
+          <p class="fg-state-text">Biểu đồ xuất hiện sau khi con hoàn thành phiên học đầu tiên.</p>
+        </div>
+        {% else %}
+        <div class="fg-chart"><canvas id="compChart" role="img" aria-label="Biểu đồ điểm tập trung các phiên học gần đây"></canvas></div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="fg-card" aria-labelledby="heatTitle">
+      <div class="fg-card-header">
+        <div>
+          <h2 class="fg-card-title" id="heatTitle">Điểm trung bình theo giờ bắt đầu học</h2>
+          <p class="fg-caption mb-0">Ô nét đứt là khung giờ chưa có phiên học nào.</p>
+        </div>
+      </div>
+      <div class="fg-card-body">
+        {% set ns = namespace(any=false) %}
+        {% for hour, val in heatmap_data.items() %}{% if val.samples %}{% set ns.any = true %}{% endif %}{% endfor %}
+        {% if not ns.any %}
+        <div class="fg-state is-compact">
+          <div class="fg-state-icon"><i class="fa-solid fa-table-cells-large" aria-hidden="true"></i></div>
+          <p class="fg-state-title">Chưa có dữ liệu theo giờ</p>
+        </div>
+        {% else %}
+        <div class="fg-heat">
+          {% for hour, val in heatmap_data.items() %}
+            {% if val.samples %}
+            <div class="fg-heat-cell" data-tone="{{ 'success' if val.status == 'high' else ('warning' if val.status == 'med' else 'danger') }}" title="{{ val.samples }} phiên">
+              <span>{{ hour }}</span><strong>{{ val.score }}</strong>
+            </div>
+            {% else %}
+            <div class="fg-heat-cell is-empty"><span>{{ hour }}</span><strong aria-label="chưa có dữ liệu">—</strong></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+
+  <section class="fg-card" aria-labelledby="attTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="attTitle">Điểm danh các buổi học trên lớp</h2>
+        <p class="fg-caption mb-0">10 buổi gần nhất, gồm cả buổi vắng mặt.</p>
+      </div>
+    </div>
+    <div class="fg-card-body is-flush">
+      {% if attendance %}
+      <div class="fg-table-wrap">
+        <table class="fg-table is-stack">
+          <thead><tr><th>Buổi học</th><th>Điểm danh</th><th class="is-num">Điểm trung bình</th><th class="is-num">Rời chỗ</th></tr></thead>
+          <tbody>
+            {% for a in attendance %}
+            <tr>
+              <td class="is-primary"><span class="fg-person-name" data-fg-datetime="{{ a.started_at }}">{{ a.started_at }}</span></td>
+              <td data-label="Điểm danh">
+                {% if a.attendance_status == 'PRESENT' %}<span class="fg-badge" data-tone="success"><i class="fa-solid fa-user-check" aria-hidden="true"></i>Có mặt</span>
+                {% elif a.attendance_status == 'LATE' %}<span class="fg-badge" data-tone="warning"><i class="fa-solid fa-user-clock" aria-hidden="true"></i>Đi muộn</span>
+                {% else %}<span class="fg-badge" data-tone="danger"><i class="fa-solid fa-user-slash" aria-hidden="true"></i>Vắng mặt</span>{% endif %}
+              </td>
+              <td class="is-num" data-label="Điểm trung bình">{% if a.focus_score is not none %}{{ a.focus_score }}{% else %}<span class="fg-muted">Chưa có</span>{% endif %}</td>
+              <td class="is-num" data-label="Rời chỗ">{% if a.missed %}—{% else %}{{ a.away_count or 0 }} lần{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="fg-state is-compact">
+        <div class="fg-state-icon"><i class="fa-solid fa-clipboard-check" aria-hidden="true"></i></div>
+        <p class="fg-state-title">Lớp của con chưa có buổi học nào đã kết thúc</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="fg-banner" data-tone="info">
+    <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+    <div>
+      <div class="fg-banner-title">Về dữ liệu trên trang này</div>
+      <div>Hệ thống chỉ ghi nhận hành vi nhìn thấy được qua camera (dùng điện thoại, buồn ngủ, quay đi, rời chỗ). Không ghi hình, không lưu ảnh. Điểm tập trung là chỉ số tham khảo, không phải đánh giá năng lực của con.</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if linked %}
+<script type="application/json" id="fgBoot">{{ {'comparison': comparison}|tojson }}</script>
+<script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chart.js') }}"></script>
+<script>
+(function () {
+  "use strict";
+  var FG = window.FG;
+  document.addEventListener("DOMContentLoaded", function () {
+    var boot = JSON.parse(document.getElementById("fgBoot").textContent);
+    var chart = null;
+    function draw() {
+      var canvas = document.getElementById("compChart");
+      if (!canvas || !window.Chart) return;
+      if (chart) chart.destroy();
+      FG.chartDefaults();
+      chart = new window.Chart(canvas, {
+        type: "bar",
+        data: { labels: boot.comparison.map(function (c) { return FG.dateTime(c.start_time); }),
+                datasets: [{ label: "Điểm", data: boot.comparison.map(function (c) { return c.score; }), backgroundColor: FG.cssVar("--fg-primary") }] },
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100 } } }
+      });
+    }
+    draw();
+    document.addEventListener("fg:theme", draw);
+
+    /* Live state of the child's own session, pushed by the server. */
+    var body = document.getElementById("liveBody"), badge = document.getElementById("liveBadge"), last = 0;
+    function idle() {
+      badge.innerHTML = "";
+      body.innerHTML = '<p class="mb-0 fg-muted">Con hiện không có phiên học nào đang diễn ra trên máy.</p>';
+    }
+    var socket = FG.connectSocket();
+    if (socket) socket.on("my_stats_update", function (s) {
+      if (!s || !s.focus_state) return;
+      last = Date.now();
+      var st = FG.studentStatus(s, { active: true, mode: "personal" });
+      badge.innerHTML = FG.badge("Đang học", "success", "fa-circle-play");
+      body.innerHTML = '<div class="fg-row">' + FG.badge(st.label, st.tone, st.icon) +
+        '<span>Điểm tập trung hiện tại: <strong>' + (FG.hasScore(s.focus_score) ? s.focus_score + "/100" : "Chưa có") + "</strong></span></div>";
+    });
+    setInterval(function () { if (last && Date.now() - last > 5000) { last = 0; idle(); } }, 2000);
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

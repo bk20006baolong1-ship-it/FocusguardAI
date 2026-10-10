@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% set titles = {'accounts': 'Tài khoản', 'classes': 'Lớp học'} %}
+{% block title %}{{ titles[active_tab] }}{% endblock %}
+{% block page_title %}{{ titles[active_tab] }}{% endblock %}
+
+{% block content %}
+<div id="adminPage" data-page="{{ active_tab }}" class="fg-stack">
+
+  {% if active_tab == 'accounts' %}
+  <section class="fg-card" aria-labelledby="usersTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="usersTitle">Tài khoản người dùng</h2>
+        <p class="fg-caption mb-0" id="usersSub">Đang tải…</p>
+      </div>
+      <button type="button" class="btn btn-primary" id="userAdd"><i class="fa-solid fa-plus" aria-hidden="true"></i>Thêm tài khoản</button>
+    </div>
+    <div class="fg-card-body" style="padding-bottom: var(--fg-3);">
+      <div class="fg-row">
+        <div style="flex: 1 1 240px;">
+          <label class="fg-sr-only" for="userSearch">Tìm theo tên hoặc tên đăng nhập</label>
+          <input type="search" class="form-control" id="userSearch" placeholder="Tìm theo tên hoặc tên đăng nhập">
+        </div>
+        <div>
+          <label class="fg-sr-only" for="userRole">Lọc theo vai trò</label>
+          <select class="form-select" id="userRole" style="min-width: 170px;">
+            <option value="">Tất cả vai trò</option>
+            <option value="student">Học sinh</option>
+            <option value="teacher">Giáo viên</option>
+            <option value="parent">Phụ huynh</option>
+            <option value="admin">Quản trị viên</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="fg-card-body is-flush" id="usersBody"></div>
+  </section>
+  {% endif %}
+
+  {% if active_tab == 'classes' %}
+  <section class="fg-card" aria-labelledby="classesTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="classesTitle">Lớp học</h2>
+        <p class="fg-caption mb-0" id="classesSub">Đang tải…</p>
+      </div>
+      <button type="button" class="btn btn-primary" id="classAdd"><i class="fa-solid fa-plus" aria-hidden="true"></i>Thêm lớp</button>
+    </div>
+    <div class="fg-card-body is-flush" id="classesBody"></div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block modals %}
+{% if active_tab == 'accounts' %}
+<div class="modal fade" id="userModal" tabindex="-1" aria-labelledby="userModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" id="userForm" novalidate>
+      <div class="modal-header">
+        <h2 class="modal-title" id="userModalTitle">Thêm tài khoản</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <div class="fg-banner mb-3" data-tone="danger" id="userFormError" role="alert" hidden>
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span></span>
+        </div>
+        <div class="fg-field">
+          <label class="form-label fg-required" for="uDisplay">Họ và tên</label>
+          <input type="text" class="form-control" id="uDisplay" maxlength="80" required autocomplete="off">
+          <div class="fg-error-text" hidden>Vui lòng nhập họ và tên.</div>
+        </div>
+        <div class="fg-field">
+          <label class="form-label fg-required" for="uUsername">Tên đăng nhập</label>
+          <input type="text" class="form-control" id="uUsername" maxlength="80" required autocomplete="off" autocapitalize="none" spellcheck="false">
+          <div class="fg-error-text" hidden>Vui lòng nhập tên đăng nhập.</div>
+        </div>
+        <div class="fg-field">
+          <label class="form-label" for="uPassword" id="uPasswordLabel">Mật khẩu</label>
+          <div class="fg-input-group">
+            <input type="password" class="form-control" id="uPassword" autocomplete="new-password" aria-describedby="uPasswordHelp">
+            <button type="button" class="fg-icon-btn" id="uPasswordToggle" aria-label="Hiện mật khẩu" aria-pressed="false"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
+          </div>
+          <div class="fg-helper" id="uPasswordHelp"></div>
+          <div class="fg-error-text" hidden>Vui lòng nhập mật khẩu.</div>
+        </div>
+        <div class="fg-field">
+          <label class="form-label fg-required" for="uRole">Vai trò</label>
+          <select class="form-select" id="uRole" required>
+            <option value="student">Học sinh</option>
+            <option value="teacher">Giáo viên</option>
+            <option value="parent">Phụ huynh</option>
+            <option value="admin">Quản trị viên</option>
+          </select>
+        </div>
+        <div class="fg-field" id="uClassField">
+          <label class="form-label" for="uClass">Lớp</label>
+          <select class="form-select" id="uClass"></select>
+          <div class="fg-helper" id="uClassHelp"></div>
+        </div>
+        <div class="fg-field" id="uStudentField" hidden>
+          <label class="form-label fg-required" for="uStudent">Học sinh được liên kết</label>
+          <select class="form-select" id="uStudent"></select>
+          <div class="fg-helper">Phụ huynh chỉ xem được kết quả của học sinh này.</div>
+          <div class="fg-error-text" hidden>Vui lòng chọn học sinh.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="submit" class="btn btn-primary" id="userSave">Lưu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal fade" id="faceModal" tabindex="-1" aria-labelledby="faceModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title" id="faceModalTitle">Đăng ký khuôn mặt</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <div class="fg-banner mb-3" data-tone="info">
+          <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+          <div>
+            <div class="fg-banner-title">Dữ liệu khuôn mặt được xử lý thế nào</div>
+            <div>Ảnh chụp chỉ dùng để tạo một dãy số đặc trưng giúp camera lớp học nhận ra học sinh. Ảnh không được lưu lại. Dãy số đặc trưng có thể được xóa bất cứ lúc nào ở trang này.</div>
+          </div>
+        </div>
+        <div class="form-check fg-field">
+          <input class="form-check-input" type="checkbox" id="faceConsent">
+          <label class="form-check-label" for="faceConsent">Học sinh và phụ huynh đã đồng ý cho đăng ký khuôn mặt.</label>
+        </div>
+        <div class="fg-grid fg-grid-2" style="gap: var(--fg-4);">
+          <div>
+            <div class="fg-camera" style="aspect-ratio: 4 / 3;">
+              <video id="faceVideo" autoplay playsinline muted hidden></video>
+              <div class="fg-camera-state" id="faceState">
+                <i class="fa-solid fa-video-slash" aria-hidden="true"></i>
+                <div class="fg-camera-state-title">Camera chưa bật</div>
+                <p class="fg-camera-state-text">Xác nhận đã có sự đồng ý, sau đó bấm Bật camera.</p>
+              </div>
+            </div>
+            <div class="fg-row mt-3">
+              <button type="button" class="btn btn-secondary" id="faceStart" disabled><i class="fa-solid fa-video" aria-hidden="true"></i>Bật camera</button>
+              <button type="button" class="btn btn-primary" id="faceCapture" disabled><i class="fa-solid fa-camera" aria-hidden="true"></i>Chụp ảnh</button>
+            </div>
+          </div>
+          <div>
+            <p class="fg-card-title mb-1">Ảnh đã chụp: <span id="faceCount">0</span>/5</p>
+            <p class="fg-helper mt-0">Cần ít nhất 3 ảnh. Nhìn thẳng, rồi hơi nghiêng trái và phải. Đủ sáng, không đeo khẩu trang.</p>
+            <div class="fg-row" id="faceThumbs" aria-live="polite"></div>
+            <p class="fg-caption mt-3 mb-0" id="faceHint" role="status"></p>
+          </div>
+        </div>
+        <canvas id="faceCanvas" width="640" height="480" hidden></canvas>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-primary" id="faceSave" disabled>Lưu đăng ký</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if active_tab == 'classes' %}
+<div class="modal fade" id="classModal" tabindex="-1" aria-labelledby="classModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" id="classForm" novalidate>
+      <div class="modal-header">
+        <h2 class="modal-title" id="classModalTitle">Thêm lớp</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <div class="fg-banner mb-3" data-tone="danger" id="classFormError" role="alert" hidden>
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span></span>
+        </div>
+        <div class="fg-field mb-0">
+          <label class="form-label fg-required" for="cName">Tên lớp</label>
+          <input type="text" class="form-control" id="cName" maxlength="40" required autocomplete="off" placeholder="Ví dụ: 8A1">
+          <div class="fg-error-text" hidden>Vui lòng nhập tên lớp.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="submit" class="btn btn-primary" id="classSave">Lưu</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script type="application/json" id="fgBoot">{{ {'page': active_tab}|tojson }}</script>
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% endblock %}

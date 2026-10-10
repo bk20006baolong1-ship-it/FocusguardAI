@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="vi" data-bs-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Đăng nhập · FocusGuard</title>
+  <script>
+    (function () { try { var t = localStorage.getItem("fg-theme"); if (t === "dark" || t === "light") document.documentElement.setAttribute("data-bs-theme", t); } catch (e) {} })();
+  </script>
+  <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/all.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
+</head>
+<body>
+<div class="fg-auth">
+  <section class="fg-auth-side" aria-label="Giới thiệu FocusGuard">
+    <div class="fg-row">
+      <span class="fg-brand-mark" style="background: #fff; color: var(--fg-primary);"><i class="fa-solid fa-eye" aria-hidden="true"></i></span>
+      <strong style="font-size: 1.25rem;">FocusGuard</strong>
+    </div>
+    <h1>Hỗ trợ giáo viên nhận biết khi học sinh cần được quan tâm</h1>
+    <p>FocusGuard quan sát hành vi nhìn thấy được qua camera và tóm tắt lại để giáo viên hỗ trợ học sinh đúng lúc.</p>
+    <ul class="fg-auth-points">
+      <li><i class="fa-solid fa-circle-check" aria-hidden="true"></i><span>Chỉ ghi nhận hành vi quan sát được: dùng điện thoại, buồn ngủ, quay đi, rời chỗ.</span></li>
+      <li><i class="fa-solid fa-shield-halved" aria-hidden="true"></i><span>Không ghi hình, không lưu ảnh khuôn mặt.</span></li>
+      <li><i class="fa-solid fa-user-check" aria-hidden="true"></i><span>Kết quả là gợi ý tham khảo, giáo viên là người quyết định.</span></li>
+    </ul>
+  </section>
+
+  <main class="fg-auth-main">
+    <div class="fg-auth-card">
+      <div class="fg-row mb-4 d-lg-none">
+        <span class="fg-brand-mark"><i class="fa-solid fa-eye" aria-hidden="true"></i></span>
+        <strong style="font-size: 1.125rem;">FocusGuard</strong>
+      </div>
+      <h2 class="fg-page-title">Đăng nhập</h2>
+      <p class="fg-page-sub mb-4">Dùng tài khoản nhà trường cấp cho bạn.</p>
+
+      {% if notice %}
+      <div class="fg-banner mb-3" data-tone="info" role="status">
+        <i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>{{ notice }}</span>
+      </div>
+      {% endif %}
+      {% if error %}
+      <div class="fg-banner mb-3" data-tone="danger" role="alert" id="loginError">
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span>{{ error }}</span>
+      </div>
+      {% endif %}
+
+      <form method="POST" action="{{ url_for('login') }}" id="loginForm" novalidate>
+        <div class="fg-field">
+          <label class="form-label" for="username">Tên đăng nhập</label>
+          <input type="text" class="form-control" id="username" name="username" value="{{ username or '' }}"
+                 autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="80" required
+                 {% if error %}aria-describedby="loginError"{% endif %} {% if not username %}autofocus{% endif %}>
+          <div class="fg-error-text" id="usernameError" hidden>Vui lòng nhập tên đăng nhập.</div>
+        </div>
+        <div class="fg-field">
+          <label class="form-label" for="password">Mật khẩu</label>
+          <div class="fg-input-group">
+            <input type="password" class="form-control" id="password" name="password" autocomplete="current-password"
+                   required {% if username %}autofocus{% endif %}>
+            <button type="button" class="fg-icon-btn" id="togglePassword" aria-label="Hiện mật khẩu" aria-pressed="false">
+              <i class="fa-solid fa-eye" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div class="fg-error-text" id="passwordError" hidden>Vui lòng nhập mật khẩu.</div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg w-100" id="loginBtn">Đăng nhập</button>
+      </form>
+
+      <p class="fg-helper mt-3">Quên mật khẩu? Liên hệ quản trị viên của trường để được cấp lại.</p>
+
+      {% if show_demo %}
+      <div class="fg-card mt-4">
+        <div class="fg-card-body" style="padding: var(--fg-4);">
+          <p class="fg-card-title mb-1">Tài khoản thử nghiệm</p>
+          <p class="fg-helper mt-0 mb-3">Chỉ có ở môi trường phát triển. Chọn một vai trò để điền sẵn tên đăng nhập.</p>
+          <div class="fg-row" id="demoAccounts">
+            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="teacher">Giáo viên</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="hocsinh">Học sinh</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="phuhuynh">Phụ huynh</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="admin">Quản trị</button>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var form = document.getElementById("loginForm");
+  var user = document.getElementById("username");
+  var pass = document.getElementById("password");
+  var btn = document.getElementById("loginBtn");
+  var toggle = document.getElementById("togglePassword");
+  var submitted = false;
+
+  toggle.addEventListener("click", function () {
+    var show = pass.type === "password";
+    pass.type = show ? "text" : "password";
+    toggle.setAttribute("aria-pressed", show ? "true" : "false");
+    toggle.setAttribute("aria-label", show ? "Ẩn mật khẩu" : "Hiện mật khẩu");
+    toggle.innerHTML = '<i class="fa-solid ' + (show ? "fa-eye-slash" : "fa-eye") + '" aria-hidden="true"></i>';
+  });
+
+  function check(input, errorId) {
+    var bad = !input.value.trim();
+    input.classList.toggle("is-invalid", bad);
+    input.setAttribute("aria-invalid", bad ? "true" : "false");
+    document.getElementById(errorId).hidden = !bad;
+    return !bad;
+  }
+  user.addEventListener("input", function () { check(user, "usernameError"); });
+  pass.addEventListener("input", function () { check(pass, "passwordError"); });
+
+  form.addEventListener("submit", function (e) {
+    if (submitted) { e.preventDefault(); return; }          /* no double submit */
+    var okUser = check(user, "usernameError"), okPass = check(pass, "passwordError");
+    if (!okUser || !okPass) { e.preventDefault(); (okUser ? pass : user).focus(); return; }
+    submitted = true;
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+    btn.innerHTML = '<span class="spinner-border" aria-hidden="true"></span>Đang đăng nhập…';
+  });
+  /* back/forward cache restores the page with the button disabled */
+  window.addEventListener("pageshow", function () {
+    submitted = false; btn.disabled = false; btn.removeAttribute("aria-busy"); btn.textContent = "Đăng nhập";
+  });
+
+  var demo = document.getElementById("demoAccounts");
+  if (demo) demo.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-demo-user]");
+    if (!b) return;
+    user.value = b.getAttribute("data-demo-user");
+    check(user, "usernameError");
+    pass.value = "";
+    pass.focus();
+  });
+})();
+</script>
+</body>
+</html>

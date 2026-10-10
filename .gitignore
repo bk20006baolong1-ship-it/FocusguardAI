@@ -1,0 +1,47 @@
+# Python / tooling
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+.vscode/
+.idea/
+.gemini/
+node_modules/
+*-debug.log
+*_emulator.log
+
+# Secrets and local configuration (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+serviceAccount*.json
+*service-account*.json
+*-adminsdk-*.json
+
+# Databases and runtime data
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/
+firebase-export-*/
+firebase-debug.log*
+
+# Biometric / personal data: face photos, uploads, recordings
+static/uploads/
+faces/
+*.mp4
+*.avi
+*.mov
+*.mkv
+recordings/
+
+# Private evaluation data (labelled real-world footage/annotations)
+evaluation/private/
+evaluation/datasets/
