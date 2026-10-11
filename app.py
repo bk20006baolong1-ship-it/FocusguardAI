@@ -110,6 +110,7 @@ class CameraHub:
     def _close(self):
         try:
             self.pipeline.release()
+            time.sleep(0.15)
         except Exception as exc:
             print("[CAMERA] release error:", exc)
         self.pipeline = None

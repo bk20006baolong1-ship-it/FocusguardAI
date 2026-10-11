@@ -37,6 +37,20 @@ LANDMARK_INTERVAL = 0.3      # seconds between MediaPipe runs per track
 LANDMARK_MAX_AGE = 0.6       # cached EAR/pose older than this is "not measured"
 
 
+import os
+
+def _open_capture(index):
+    if os.name == "nt":
+        cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            return cap
+    cap = cv2.VideoCapture(index)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    return cap
+
+
 class ClassroomAI:
     mode = "classroom"
 
@@ -57,12 +71,18 @@ class ClassroomAI:
             num_faces=1,
         )
         self.detector = vision.FaceLandmarker.create_from_options(options)
-        self.cap = cv2.VideoCapture(camera_index)
+        self.cap = _open_capture(camera_index)
+        self.device_ok = None
+        self._consecutive_failures = 0
+        self._last_reopen_at = 0.0
         for _ in range(15):
             ok, _ = self.cap.read()
             if ok:
+                self.device_ok = True
                 break
             time.sleep(0.1)
+        if self.device_ok is None:
+            self.device_ok = self.cap.isOpened()
         self.identity = IdentityManager(config=self.config.identity)
         self.names = {}
         self.reload_gallery()
@@ -81,7 +101,7 @@ class ClassroomAI:
         return self.names
 
     def release(self):
-        if self.cap.isOpened():
+        if self.cap is not None and self.cap.isOpened():
             self.cap.release()
 
     def _landmarks(self, track_id, crop, now):
@@ -103,16 +123,39 @@ class ClassroomAI:
 
     def get_frame(self):
         runtime = self.session_manager.classroom_runtime(self.class_id, self.class_session_id)
-        if not self.cap.isOpened():
-            self.cap.open(self.camera_index)
-        ok, frame = self.cap.read()
-        self.device_ok = bool(ok)     # read by the server to report a truthful camera state
-        if not ok:
+        now = time.time()
+
+        if self.cap is None or not self.cap.isOpened():
+            if now - self._last_reopen_at >= 2.0:
+                self._last_reopen_at = now
+                self.cap = _open_capture(self.camera_index)
+
+        ok, frame = (False, None)
+        if self.cap is not None and self.cap.isOpened():
+            ok, frame = self.cap.read()
+
+        if not ok or frame is None:
+            self._consecutive_failures += 1
+            self.device_ok = False
+            # Safely recover camera connection after consecutive failures with rate limit
+            if self._consecutive_failures >= 3 and (now - self._last_reopen_at) >= 2.0:
+                self._last_reopen_at = now
+                try:
+                    if self.cap is not None:
+                        self.cap.release()
+                except Exception:
+                    pass
+                time.sleep(0.1)
+                self.cap = _open_capture(self.camera_index)
+
             dummy = np.zeros((480, 640, 3), dtype=np.uint8)
             cv2.putText(dummy, "CLASSROOM CAMERA OFFLINE", (120, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
             _, buf = cv2.imencode(".jpg", dummy)
             time.sleep(0.2)
             return buf.tobytes(), False, "NO_CAMERA_SIGNAL"
+
+        self._consecutive_failures = 0
+        self.device_ok = True
 
         now = time.time()
         h, w = frame.shape[:2]

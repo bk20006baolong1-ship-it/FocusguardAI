@@ -22,6 +22,7 @@ Persistence goes through a ``sink`` object so the runtime stays testable:
 ``save_session_student(dict)``. Realtime notifications go through an optional
 ``notifier(event_name, payload)`` callback.
 """
+import os
 import threading
 from collections import deque
 from datetime import datetime
@@ -65,6 +66,9 @@ class SessionRuntime:
         self.sink = sink or NullSink()
         self.notifier = notifier
         self.snapshot_interval = snapshot_interval_seconds
+        if camera_stale_seconds == 3.0:
+            env_stale = os.environ.get("FG_CAMERA_STALE_SECONDS")
+            camera_stale_seconds = float(env_stale) if env_stale else 5.0
         self.camera_stale_seconds = camera_stale_seconds
         self.source = source
         self.started_at = started_at
@@ -77,6 +81,7 @@ class SessionRuntime:
         self._last_snapshot_at: Dict[int, float] = {}
         self._history: Dict[int, deque] = {}           # live chart, 1 sample/s, in memory only
         self._last_obs_at: Dict[int, float] = {}       # per-student camera freshness (online/personal)
+        self._last_diag_at: Dict[int, float] = {}      # throttled diagnostic logging
         self.episodes: List[BehaviorEpisode] = []   # closed episodes, for summaries/evaluation
         self.logs: List[dict] = []
         self.lock = threading.RLock()
@@ -174,6 +179,7 @@ class SessionRuntime:
         # 1) integrate the elapsed interval with the state that was in force
         prev_state = st.focus_state
         prev_vis = st.visibility_status
+        prev_score = st.focus_score
         self.engine.advance(st, prev_state, now)
         if prev_vis == rs.VIS_VISIBLE and st.last_seen_at is not None:
             st.visible_seconds += max(0.0, min(now - st.last_seen_at, self.config.focus.max_step_seconds))
@@ -229,6 +235,26 @@ class SessionRuntime:
         if st.focus_score is not None and (last is None or now - last >= self.snapshot_interval):
             self._last_snapshot_at[st.student_id] = now
             self._snapshot(st, now)
+
+        # 7) Controlled diagnostic log on state changes or throttled interval
+        last_d = self._last_diag_at.get(st.student_id, 0.0)
+        state_changed = (prev_state != st.focus_state or prev_vis != st.visibility_status)
+        if state_changed or (now - last_d >= 3.0):
+            self._last_diag_at[st.student_id] = now
+            s_before = f"{prev_score:.2f}" if prev_score is not None else "None"
+            s_after = f"{st.focus_score:.2f}" if st.focus_score is not None else "None"
+            active_ep = st.active_episodes.get(st.focus_state)
+            ep_dur = f"{(now - active_ep['start_time']):.1f}s" if active_ep else "0.0s"
+            ear_str = f"{obs.ear:.3f}" if obs.ear is not None else "None"
+            yaw_str = f"{obs.yaw:.1f}" if obs.yaw is not None else "None"
+            pitch_str = f"{obs.pitch:.1f}" if obs.pitch is not None else "None"
+            raw = analyzer.raw_signals(obs)
+            raw_str = f"phone={raw['PHONE'][0]},drowsy={raw['DROWSY'][0]},head_away={raw['HEAD_AWAY'][0]}"
+            print(f"[DIAG] t={now:.1f} sid={st.student_id} track_id={st.active_track_id} "
+                  f"yaw={yaw_str} pitch={pitch_str} ear={ear_str} "
+                  f"raw_signals=[{raw_str}] focus_state={st.focus_state} viol_dur={ep_dur} "
+                  f"score={s_before}->{s_after}")
+
         return notes
 
     def _close_episode(self, st: rs.StudentRuntimeState, ep: BehaviorEpisode):

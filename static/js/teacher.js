@@ -203,8 +203,14 @@
         dashboard.students();
       });
       $("studentGrid").addEventListener("click", openPanelFromEvent);
-      $("attentionList").addEventListener("click", openPanelFromEvent);
       const feed = $("cameraFeed");
+      feed.addEventListener("load", () => {
+        S.camera.error = false;
+        if (S.data && S.data.camera && S.data.camera.state === "ACTIVE") {
+          feed.hidden = false;
+          $("cameraState").hidden = true;
+        }
+      });
       feed.addEventListener("error", () => { if (S.camera.src) { S.camera.error = true; dashboard.camera(); } });
       $("cameraState").addEventListener("click", (e) => { if (e.target.closest("[data-camera-retry]")) dashboard.cameraRestart(); });
       FG.skeleton($("attentionList"), 2);
@@ -433,7 +439,7 @@
       if (!S.camera.src && !S.camera.error) { dashboard.cameraRestart(); return; }
       const cam = d.camera || { state: "STARTING", label: "Đang khởi động camera", help: "" };
       const waited = (performance.now() - S.camera.startedAt) / 1000;
-      if (S.camera.error) {
+      if (S.camera.error && cam.state !== "ACTIVE") {
         feed.hidden = true;
         setBadge("danger", "fa-video-slash", "Không có hình ảnh");
         show("fa-video-slash", "Không tải được hình ảnh camera", "Kết nối tới camera bị ngắt. Điểm tập trung tạm dừng, không bị trừ.", "Thử lại");
@@ -441,6 +447,10 @@
       }
       switch (cam.state) {
         case "ACTIVE":
+          if (S.camera.error) {
+            S.camera.error = false;
+            feed.src = "/video_feed" + classQuery("&mode=classroom&t=" + Date.now());
+          }
           feed.hidden = false; overlay.hidden = true; overlay._sig = null;
           setBadge("success", "fa-video", "Đang hoạt động");
           break;

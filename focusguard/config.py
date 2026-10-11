@@ -61,24 +61,25 @@ class BehaviorConfig:
     # Head-pose limits (degrees) outside of which the head is "away".
     yaw_limit_deg: float = 20.0
     pitch_limit_deg: float = 20.0
+    # Pitch deviation limits (degrees) relative to student's normal resting baseline.
+    pitch_down_limit_deg: float = 15.0  # bowing head down (cúi đầu)
+    pitch_up_limit_deg: float = 20.0    # tilting head up (ngẩng đầu)
     # Minimum continuous duration before a raw signal becomes a behaviour.
     drowsy_min_seconds: float = 1.5
     head_away_min_seconds: float = 2.0
     phone_min_seconds: float = 1.0
     # Gaps shorter than this inside an active episode do not end it
     # (e.g. one missed phone detection mid-episode).
-    gap_tolerance_seconds: float = 0.5
+    gap_tolerance_seconds: float = 1.0
     # Not visible for less than this is TEMPORARILY_NOT_VISIBLE,
     # longer is AWAY (left the seat).
     away_min_seconds: float = 10.0
     # Eye-closure threshold adapts to each student's own open-eye EAR: closed
-    # means EAR < min(ear_threshold, ear_closed_ratio * baseline), where the
-    # baseline is a high percentile of that student's recent EAR. A fixed 0.22
-    # produced drowsy episodes for a real student with open eyes (EAR of open
-    # eyes depends on the person and the camera angle).
-    # 0.6 from the real run: open-eye EAR p20 ~0.196 / median ~0.248 for the
-    # volunteer, closed eyes <= ~0.12; 0.75*baseline (~0.216) flagged open eyes.
-    ear_closed_ratio: float = 0.6
+    # means EAR < min(ear_threshold, max(ear_min_closed_threshold, ear_closed_ratio * baseline)).
+    # The floor (ear_min_closed_threshold) guarantees the adaptive threshold
+    # never drops so low that prolonged eye closure fails to be detected.
+    ear_closed_ratio: float = 0.65
+    ear_min_closed_threshold: float = 0.16
     ear_baseline_percentile: float = 0.8
     ear_baseline_window_seconds: float = 60.0
     ear_baseline_min_seconds: float = 2.0
@@ -97,8 +98,8 @@ class BehaviorConfig:
 
 @dataclass(frozen=True)
 class FocusConfig:
-    # Score change per second. Positive rates recover, negative penalise.
-    recovery_per_second: float = 0.5
+    # Score change per second. Positive rates recover (+0.05/s = +0.5 per 10s), negative penalise.
+    recovery_per_second: float = 0.05
     penalty_per_second: dict = field(default_factory=lambda: {
         "PHONE": 2.0,
         "DROWSY": 1.5,
@@ -111,7 +112,7 @@ class FocusConfig:
     max_score: float = 100.0
     # Largest time step the engine will integrate at once. Longer gaps (e.g. a
     # stalled camera) are clamped so a single stall cannot wipe the score.
-    max_step_seconds: float = 2.0
+    max_step_seconds: float = 3.0
 
 
 @dataclass(frozen=True)
@@ -144,12 +145,19 @@ class PipelineConfig:
             ear_threshold=_env_float("FG_EAR_THRESHOLD", beh.ear_threshold),
             drowsy_min_seconds=_env_float("FG_DROWSY_MIN_SECONDS", beh.drowsy_min_seconds),
             head_away_min_seconds=_env_float("FG_HEAD_AWAY_MIN_SECONDS", beh.head_away_min_seconds),
+            gap_tolerance_seconds=_env_float("FG_GAP_TOLERANCE", beh.gap_tolerance_seconds),
+            pitch_down_limit_deg=_env_float("FG_PITCH_DOWN_LIMIT", beh.pitch_down_limit_deg),
+            pitch_up_limit_deg=_env_float("FG_PITCH_UP_LIMIT", beh.pitch_up_limit_deg),
             phone_min_seconds=_env_float("FG_PHONE_MIN_SECONDS", beh.phone_min_seconds),
             phone_min_confidence=_env_float("FG_PHONE_MIN_CONFIDENCE", beh.phone_min_confidence),
             ear_closed_ratio=_env_float("FG_EAR_CLOSED_RATIO", beh.ear_closed_ratio),
+            ear_min_closed_threshold=_env_float("FG_EAR_MIN_CLOSED_THRESHOLD", beh.ear_min_closed_threshold),
+        )
+        foc = FocusConfig(
+            recovery_per_second=_env_float("FG_RECOVERY_PER_SECOND", 0.05),
         )
         att = AttendanceConfig(late_after_seconds=_env_float("FG_LATE_AFTER_SECONDS", 300.0))
-        return cls(identity=ident, behavior=beh, attendance=att)
+        return cls(identity=ident, behavior=beh, focus=foc, attendance=att)
 
     def with_behavior(self, **kwargs):
         return replace(self, behavior=replace(self.behavior, **kwargs))

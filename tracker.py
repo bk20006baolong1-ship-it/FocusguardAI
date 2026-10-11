@@ -20,7 +20,7 @@ class PersonTracker:
     def track(self, frame):
         """Return ``[{'track_id': int, 'bbox': [x1, y1, x2, y2], 'conf': float}]``."""
         results = self.model.track(source=frame, persist=True, tracker="bytetrack.yaml",
-                                   classes=[PERSON_CLASS], verbose=False)
+                                   classes=[PERSON_CLASS], imgsz=320, verbose=False)
         tracked = []
         if len(results) > 0 and results[0].boxes is not None and results[0].boxes.id is not None:
             for box in results[0].boxes:
@@ -34,7 +34,7 @@ class PersonTracker:
     def detect_phones(self, frame):
         """Return ``[((x1, y1, x2, y2), confidence)]`` for cell phones."""
         phones = []
-        for r in self.phone_model.predict(source=frame, classes=[PHONE_CLASS], verbose=False):
+        for r in self.phone_model.predict(source=frame, classes=[PHONE_CLASS], imgsz=320, verbose=False):
             for box in r.boxes:
                 phones.append((tuple(map(float, box.xyxy[0].tolist())), float(box.conf[0])))
         return phones

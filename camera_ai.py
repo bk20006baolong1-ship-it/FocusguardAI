@@ -29,6 +29,20 @@ STATE_COLORS = {
 }
 
 
+import os
+
+def _open_capture(index):
+    if os.name == "nt":
+        cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            return cap
+    cap = cv2.VideoCapture(index)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    return cap
+
+
 class FocusAI:
     mode = "personal"
 
@@ -45,12 +59,18 @@ class FocusAI:
             num_faces=2,
         )
         self.detector = vision.FaceLandmarker.create_from_options(options)
-        self.cap = cv2.VideoCapture(camera_index)
-        for _ in range(30):  # macOS AVFoundation warm-up
+        self.cap = _open_capture(camera_index)
+        self.device_ok = None
+        self._consecutive_failures = 0
+        self._last_reopen_at = 0.0
+        for _ in range(30):  # warm-up
             ok, _ = self.cap.read()
             if ok:
+                self.device_ok = True
                 break
             time.sleep(0.1)
+        if self.device_ok is None:
+            self.device_ok = self.cap.isOpened()
         self.current_state = rs.FOCUS_UNKNOWN
         self.has_seen_face = False
         self.face_missing_since = None
@@ -62,13 +82,36 @@ class FocusAI:
         return buf.tobytes()
 
     def get_frame(self):
-        if not self.cap.isOpened():
-            self.cap.open(self.camera_index)
-        ok, frame = self.cap.read()
-        self.device_ok = bool(ok)     # read by the server to report a truthful camera state
-        if not ok:
-            time.sleep(0.5)
+        now = time.time()
+
+        if self.cap is None or not self.cap.isOpened():
+            if now - self._last_reopen_at >= 2.0:
+                self._last_reopen_at = now
+                self.cap = _open_capture(self.camera_index)
+
+        ok, frame = (False, None)
+        if self.cap is not None and self.cap.isOpened():
+            ok, frame = self.cap.read()
+
+        if not ok or frame is None:
+            self._consecutive_failures += 1
+            self.device_ok = False
+            # Safely recover camera connection after consecutive failures with rate limit
+            if self._consecutive_failures >= 3 and (now - self._last_reopen_at) >= 2.0:
+                self._last_reopen_at = now
+                try:
+                    if self.cap is not None:
+                        self.cap.release()
+                except Exception:
+                    pass
+                time.sleep(0.1)
+                self.cap = _open_capture(self.camera_index)
+
+            time.sleep(0.2)
             return self._offline_frame("CAMERA KHONG KHA DUNG"), False, "NO_CAMERA_SIGNAL"
+
+        self._consecutive_failures = 0
+        self.device_ok = True
 
         now = time.time()
         frame = cv2.flip(frame, 1)
@@ -76,7 +119,7 @@ class FocusAI:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         persons, phones = {}, []
-        for r in self.yolo_model(rgb, classes=[0, 67], verbose=False):
+        for r in self.yolo_model(rgb, imgsz=320, classes=[0, 67], verbose=False):
             for i, box in enumerate(r.boxes):
                 cls_id = int(box.cls[0])
                 x1, y1, x2, y2 = map(float, box.xyxy[0])
@@ -96,16 +139,8 @@ class FocusAI:
             angles, *_ = cv2.RQDecomp3x3(np.asarray(result.facial_transformation_matrixes[0])[0:3, 0:3])
             pitch, yaw = float(angles[0]), float(angles[1])
         else:
-            if self.has_seen_face:
-                if self.face_missing_since is None:
-                    self.face_missing_since = now
-                missing_duration = now - self.face_missing_since
-                # Khi học sinh quay mặt đi hoặc quay đầu khiến không nhận diện được khuôn mặt,
-                # gán yaw = 35.0 (> yaw_limit_deg 20.0) để BehaviorAnalyzer đếm thời gian vi phạm (~2s)
-                # và kích hoạt trạng thái HEAD_AWAY theo cơ chế tính điểm chuẩn của hệ thống.
-                if persons or missing_duration < self.config.away_min_seconds:
-                    yaw = 35.0
-                    pitch = 0.0
+            if self.has_seen_face and self.face_missing_since is None:
+                self.face_missing_since = now
 
         # The student is the largest person box (or the face if no person box).
         phone_conf = None
@@ -115,9 +150,6 @@ class FocusAI:
                                           self.config.phone_min_confidence,
                                           self.config.phone_min_containment).get(main_id)
         visible = bool(faces) or bool(persons)
-        if not visible and self.has_seen_face and self.face_missing_since is not None:
-            if (now - self.face_missing_since) < self.config.away_min_seconds:
-                visible = True
         obs = Observation(timestamp=now, visible=visible, face_visible=bool(faces), ear=ear, yaw=yaw,
                           pitch=pitch, phone_confidence=phone_conf, source="personal_camera",
                           extra={"people_in_frame": max(len(persons), len(faces))})

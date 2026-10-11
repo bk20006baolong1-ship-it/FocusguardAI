@@ -57,6 +57,8 @@ def derive(session_active: bool, hub: dict, runtime_camera_status: str) -> str:
         return NOT_STREAMING
     if hub.get("device_ok") is False:
         return UNAVAILABLE
+    if hub.get("device_ok") is None:
+        return STARTING
     if runtime_camera_status == "NO_SIGNAL":
         return NO_SIGNAL
     if runtime_camera_status == "ACTIVE":

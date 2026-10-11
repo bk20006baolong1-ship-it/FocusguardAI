@@ -52,8 +52,15 @@
 
     init() {
       $("startBtn").addEventListener("click", dashboard.start);
-      $("stopBtn").addEventListener("click", dashboard.stop);
-      $("cameraFeed").addEventListener("error", () => { if (dashboard.camera.src) { dashboard.camera.error = true; dashboard.renderCamera(); } });
+      const feed = $("cameraFeed");
+      feed.addEventListener("load", () => {
+        dashboard.camera.error = false;
+        if (dashboard.data && dashboard.data.camera && dashboard.data.camera.state === "ACTIVE") {
+          feed.hidden = false;
+          $("cameraState").hidden = true;
+        }
+      });
+      feed.addEventListener("error", () => { if (dashboard.camera.src) { dashboard.camera.error = true; dashboard.renderCamera(); } });
       $("cameraState").addEventListener("click", (e) => { if (e.target.closest("[data-camera-retry]")) dashboard.cameraRestart(); });
       document.addEventListener("fg:theme", () => { FG.chartDefaults(); if (dashboard.chart) { dashboard.chart.destroy(); dashboard.chart = null; dashboard.renderChart(); } });
       document.addEventListener("visibilitychange", () => {
@@ -210,7 +217,7 @@
       if (!cam.src && !cam.error) { dashboard.cameraRestart(); return; }
       const c = d.camera || { state: "STARTING", label: "Đang khởi động camera", help: "" };
       const waited = (performance.now() - cam.startedAt) / 1000;
-      if (cam.error) {
+      if (cam.error && c.state !== "ACTIVE") {
         feed.hidden = true;
         setBadge("danger", "fa-video-slash", "Không có hình ảnh");
         show("fa-video-slash", "Không tải được hình ảnh camera", "Kết nối tới camera bị ngắt. Điểm tạm dừng, không bị trừ.", "Thử lại");
@@ -218,6 +225,10 @@
       }
       switch (c.state) {
         case "ACTIVE":
+          if (cam.error) {
+            cam.error = false;
+            feed.src = "/video_feed?t=" + Date.now();
+          }
           feed.hidden = false; overlay.hidden = true; overlay._sig = null;
           setBadge("success", "fa-video", "Đang hoạt động");
           break;
