@@ -225,8 +225,9 @@
       }
       switch (c.state) {
         case "ACTIVE":
-          if (cam.error) {
+          if (cam.error || !cam.src || !feed.src) {
             cam.error = false;
+            cam.src = true;
             feed.src = "/video_feed?t=" + Date.now();
           }
           feed.hidden = false; overlay.hidden = true; overlay._sig = null;

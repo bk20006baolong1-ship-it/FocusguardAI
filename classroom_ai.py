@@ -44,10 +44,22 @@ def _open_capture(index):
         cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            return cap
+            ok, test_frame = cap.read()
+            if ok and test_frame is not None and test_frame.size > 0:
+                print(f"[CAMERA] Opened camera {index} with DirectShow (CAP_DSHOW): {test_frame.shape[1]}x{test_frame.shape[0]}")
+                return cap
+            print(f"[CAMERA] CAP_DSHOW opened camera {index} but read() failed, falling back to default backend")
+            cap.release()
     cap = cv2.VideoCapture(index)
     if cap.isOpened():
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        ok, test_frame = cap.read()
+        if ok and test_frame is not None and test_frame.size > 0:
+            print(f"[CAMERA] Opened camera {index} with default backend: {test_frame.shape[1]}x{test_frame.shape[0]}")
+            return cap
+        print(f"[CAMERA] Default backend opened camera {index} but read() failed")
+    else:
+        print(f"[CAMERA] Failed to open camera index={index} (isOpened=False)")
     return cap
 
 
@@ -76,13 +88,20 @@ class ClassroomAI:
         self._consecutive_failures = 0
         self._last_reopen_at = 0.0
         for _ in range(15):
-            ok, _ = self.cap.read()
-            if ok:
-                self.device_ok = True
-                break
+            if self.cap is not None and self.cap.isOpened():
+                ok, _ = self.cap.read()
+                if ok:
+                    self.device_ok = True
+                    break
             time.sleep(0.1)
-        if self.device_ok is None:
-            self.device_ok = self.cap.isOpened()
+        if self.device_ok is not True:
+            self.device_ok = False
+            print(f"[CAMERA] Warmup: no valid frames read from camera {camera_index} (device_ok=False)")
+        else:
+            print(f"[CAMERA] Warmup: camera {camera_index} verified valid frame read (device_ok=True)")
+
+
+
         self.identity = IdentityManager(config=self.config.identity)
         self.names = {}
         self.reload_gallery()
@@ -128,31 +147,32 @@ class ClassroomAI:
         if self.cap is None or not self.cap.isOpened():
             if now - self._last_reopen_at >= 2.0:
                 self._last_reopen_at = now
+                print(f"[CAMERA] Capture handle closed, attempting reopen for camera {self.camera_index}")
                 self.cap = _open_capture(self.camera_index)
 
         ok, frame = (False, None)
         if self.cap is not None and self.cap.isOpened():
             ok, frame = self.cap.read()
 
-        if not ok or frame is None:
+        if not ok or frame is None or frame.size == 0:
             self._consecutive_failures += 1
             self.device_ok = False
+            if self._consecutive_failures == 1 or self._consecutive_failures % 25 == 0:
+                print(f"[CAMERA] cap.read() failed for camera {self.camera_index} (failures={self._consecutive_failures})")
             # Safely recover camera connection after consecutive failures with rate limit
             if self._consecutive_failures >= 3 and (now - self._last_reopen_at) >= 2.0:
                 self._last_reopen_at = now
+                print(f"[CAMERA] Reconnecting camera {self.camera_index} after {self._consecutive_failures} failures...")
                 try:
                     if self.cap is not None:
                         self.cap.release()
                 except Exception:
                     pass
-                time.sleep(0.1)
+                time.sleep(0.15)
                 self.cap = _open_capture(self.camera_index)
 
-            dummy = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(dummy, "CLASSROOM CAMERA OFFLINE", (120, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-            _, buf = cv2.imencode(".jpg", dummy)
-            time.sleep(0.2)
-            return buf.tobytes(), False, "NO_CAMERA_SIGNAL"
+            time.sleep(0.1)
+            return None, False, "NO_CAMERA_SIGNAL"
 
         self._consecutive_failures = 0
         self.device_ok = True
@@ -184,10 +204,12 @@ class ClassroomAI:
             "frame_hw": [h, w],
             "phones_associated": {str(k): round(v, 3) for k, v in phone_by_track.items()},
         }
+        now = time.time()
         decisions = self.identity.process_frame(
             [(tid, faces[face_by_track[tid]].embedding if tid in face_by_track else None, tid in phone_by_track)
              for tid in persons], now)
 
+        now = time.time()
         observations = {}
         for tid, box in persons.items():
             d = decisions.get(tid)
@@ -209,8 +231,9 @@ class ClassroomAI:
             if tid not in persons:
                 del self._landmark_cache[tid]
 
+        frame_now = time.time()
         if runtime is not None:
-            runtime.process_frame(now, observations)
+            runtime.process_frame(frame_now, observations)
 
         # ---- visualisation only -------------------------------------------------
         for tid, (x1, y1, x2, y2) in persons.items():
@@ -226,6 +249,8 @@ class ClassroomAI:
                 status = d.status if d else "UNKNOWN"
                 label = f"Track {tid}: {status}"
             cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-            cv2.putText(frame, label, (int(x1), max(12, int(y1) - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-        _, buf = cv2.imencode(".jpg", frame)
+        ret, buf = cv2.imencode(".jpg", frame)
+        if not ret or buf is None:
+            print("[CAMERA] cv2.imencode failed to generate JPEG")
+            return None, False, "JPEG_ENCODE_FAILED"
         return buf.tobytes(), False, "OK"

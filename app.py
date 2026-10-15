@@ -45,26 +45,33 @@ class CameraHub:
         self.generation = 0
         self.starting_key = None      # set while a pipeline (camera + models) is loading
         self.failed_key = None        # last key whose pipeline could not be started
+        self._last_frame_out = None
+        self._last_frame_time = 0.0
 
     def acquire(self, key, factory):
         with self.lock:
             if self.pipeline is not None and self.key != key:
+                print(f"[CAMERA] Switching key from {self.key} to {key}, closing old pipeline")
                 self._close()
             if self.pipeline is None:
                 self.starting_key = key
                 self.failed_key = None
+                print(f"[CAMERA] Initializing pipeline for key={key}...")
                 try:
                     self.pipeline = factory()
                 except Exception as exc:
                     self.failed_key = key
-                    print("[CAMERA] pipeline failed to start:", exc)   # details stay server-side
+                    print(f"[CAMERA] Pipeline failed to start for key={key}: {exc}")
                     raise
                 finally:
                     self.starting_key = None
                 self.key = key
                 self.users = 0
                 self.generation += 1
+                self._last_frame_out = None
+                print(f"[CAMERA] Pipeline initialized successfully, key={key}, generation={self.generation}")
             self.users += 1
+            print(f"[CAMERA] Viewer acquired generation={self.generation}, total viewers={self.users}")
             return self.pipeline, self.generation
 
     def describe(self, matches):
@@ -88,7 +95,14 @@ class CameraHub:
             pipeline = self.pipeline
             if pipeline is None or self.generation != generation:
                 return None
-            return pipeline.get_frame()
+            now = time.time()
+            if self._last_frame_out is not None and (now - self._last_frame_time) < 0.05:
+                return self._last_frame_out
+            out = pipeline.get_frame()
+            if out is not None and out[0] is not None:
+                self._last_frame_time = now
+                self._last_frame_out = out
+            return out
 
     def release(self, generation):
         """A viewer of ``generation`` left."""
@@ -96,7 +110,9 @@ class CameraHub:
             if self.pipeline is None or generation != self.generation:
                 return
             self.users -= 1
+            print(f"[CAMERA] Viewer released generation={generation}, remaining viewers={self.users}")
             if self.users <= 0:
+                print(f"[CAMERA] No viewers remaining for generation={generation}, closing pipeline")
                 self._close()
 
     def force_release(self, predicate=None):
@@ -109,14 +125,17 @@ class CameraHub:
 
     def _close(self):
         try:
-            self.pipeline.release()
-            time.sleep(0.15)
+            if self.pipeline is not None:
+                print(f"[CAMERA] Releasing hardware for key={self.key}...")
+                self.pipeline.release()
+                time.sleep(0.15)
         except Exception as exc:
             print("[CAMERA] release error:", exc)
         self.pipeline = None
         self.key = None
         self.users = 0
         self.generation += 1
+        self._last_frame_out = None
 
 
 def create_app(repo=None, env=None, async_mode=None, start_background=True, session_manager=None):
@@ -135,11 +154,14 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
     if async_mode is None:
         async_mode = os.environ.get("SOCKETIO_ASYNC_MODE")
     if async_mode is None:
-        try:
-            import eventlet  # noqa: F401
-            async_mode = "eventlet"
-        except ImportError:
+        if os.name == "nt":
             async_mode = "threading"
+        else:
+            try:
+                import eventlet  # noqa: F401
+                async_mode = "eventlet"
+            except ImportError:
+                async_mode = "threading"
     socketio = SocketIO(app, cors_allowed_origins=cfg["SOCKETIO_CORS_ORIGINS"], async_mode=async_mode,
                         logger=False, engineio_logger=False)
 
@@ -379,16 +401,31 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
     def stream(pipeline_key, factory, keep_running):
         def gen():
             generation = None
+            client_tag = f"{pipeline_key[0]}:{pipeline_key[1] if len(pipeline_key) > 1 else 'stream'}"
+            frame_count = 0
             try:
-                _, generation = cameras.acquire(pipeline_key, factory)
+                pipeline, generation = cameras.acquire(pipeline_key, factory)
+                print(f"[STREAM] Connected {client_tag}, generation={generation}")
                 while keep_running() and cameras.is_current(generation):
-                    socketio.sleep(0.05)
                     out = cameras.read(generation)
                     if out is None or out[0] is None:
+                        socketio.sleep(0.04)
                         continue
-                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + out[0] + b"\r\n"
+                    frame_bytes = out[0]
+                    if not frame_bytes:
+                        socketio.sleep(0.04)
+                        continue
+                    frame_count += 1
+                    if frame_count == 1:
+                        print(f"[STREAM] First frame sent ({len(frame_bytes)} bytes) for {client_tag}")
+                    elif frame_count % 100 == 0:
+                        print(f"[STREAM] {frame_count} frames sent for {client_tag}")
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
+                    socketio.sleep(0.02)
             except GeneratorExit:
-                pass
+                print(f"[STREAM] HTTP stream disconnected ({client_tag}) after {frame_count} frames")
+            except Exception as exc:
+                print(f"[STREAM] Error streaming {client_tag}: {exc}")
             finally:
                 if generation is not None:
                     cameras.release(generation)

@@ -68,7 +68,7 @@ class SessionRuntime:
         self.snapshot_interval = snapshot_interval_seconds
         if camera_stale_seconds == 3.0:
             env_stale = os.environ.get("FG_CAMERA_STALE_SECONDS")
-            camera_stale_seconds = float(env_stale) if env_stale else 5.0
+            camera_stale_seconds = float(env_stale) if env_stale else 6.0
         self.camera_stale_seconds = camera_stale_seconds
         self.source = source
         self.started_at = started_at

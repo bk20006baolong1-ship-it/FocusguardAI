@@ -36,10 +36,22 @@ def _open_capture(index):
         cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            return cap
+            ok, test_frame = cap.read()
+            if ok and test_frame is not None and test_frame.size > 0:
+                print(f"[CAMERA] Opened camera {index} with DirectShow (CAP_DSHOW): {test_frame.shape[1]}x{test_frame.shape[0]}")
+                return cap
+            print(f"[CAMERA] CAP_DSHOW opened camera {index} but read() failed, falling back to default backend")
+            cap.release()
     cap = cv2.VideoCapture(index)
     if cap.isOpened():
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        ok, test_frame = cap.read()
+        if ok and test_frame is not None and test_frame.size > 0:
+            print(f"[CAMERA] Opened camera {index} with default backend: {test_frame.shape[1]}x{test_frame.shape[0]}")
+            return cap
+        print(f"[CAMERA] Default backend opened camera {index} but read() failed")
+    else:
+        print(f"[CAMERA] Failed to open camera index={index} (isOpened=False)")
     return cap
 
 
@@ -63,23 +75,24 @@ class FocusAI:
         self.device_ok = None
         self._consecutive_failures = 0
         self._last_reopen_at = 0.0
-        for _ in range(30):  # warm-up
-            ok, _ = self.cap.read()
-            if ok:
-                self.device_ok = True
-                break
+        for _ in range(15):  # warm-up
+            if self.cap is not None and self.cap.isOpened():
+                ok, _ = self.cap.read()
+                if ok:
+                    self.device_ok = True
+                    break
             time.sleep(0.1)
-        if self.device_ok is None:
-            self.device_ok = self.cap.isOpened()
+        if self.device_ok is not True:
+            self.device_ok = False
+            print(f"[CAMERA] Warmup: no valid frames read from camera {camera_index} (device_ok=False)")
+        else:
+            print(f"[CAMERA] Warmup: camera {camera_index} verified valid frame read (device_ok=True)")
+
+
+
         self.current_state = rs.FOCUS_UNKNOWN
         self.has_seen_face = False
         self.face_missing_since = None
-
-    def _offline_frame(self, text):
-        dummy = np.zeros((480, 640, 3), dtype=np.uint8)
-        cv2.putText(dummy, text, (110, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-        _, buf = cv2.imencode(".jpg", dummy)
-        return buf.tobytes()
 
     def get_frame(self):
         now = time.time()
@@ -87,28 +100,32 @@ class FocusAI:
         if self.cap is None or not self.cap.isOpened():
             if now - self._last_reopen_at >= 2.0:
                 self._last_reopen_at = now
+                print(f"[CAMERA] Capture handle closed, attempting reopen for camera {self.camera_index}")
                 self.cap = _open_capture(self.camera_index)
 
         ok, frame = (False, None)
         if self.cap is not None and self.cap.isOpened():
             ok, frame = self.cap.read()
 
-        if not ok or frame is None:
+        if not ok or frame is None or frame.size == 0:
             self._consecutive_failures += 1
             self.device_ok = False
+            if self._consecutive_failures == 1 or self._consecutive_failures % 25 == 0:
+                print(f"[CAMERA] cap.read() failed for camera {self.camera_index} (failures={self._consecutive_failures})")
             # Safely recover camera connection after consecutive failures with rate limit
             if self._consecutive_failures >= 3 and (now - self._last_reopen_at) >= 2.0:
                 self._last_reopen_at = now
+                print(f"[CAMERA] Reconnecting camera {self.camera_index} after {self._consecutive_failures} failures...")
                 try:
                     if self.cap is not None:
                         self.cap.release()
                 except Exception:
                     pass
-                time.sleep(0.1)
+                time.sleep(0.15)
                 self.cap = _open_capture(self.camera_index)
 
-            time.sleep(0.2)
-            return self._offline_frame("CAMERA KHONG KHA DUNG"), False, "NO_CAMERA_SIGNAL"
+            time.sleep(0.1)
+            return None, False, "NO_CAMERA_SIGNAL"
 
         self._consecutive_failures = 0
         self.device_ok = True
@@ -150,6 +167,7 @@ class FocusAI:
                                           self.config.phone_min_confidence,
                                           self.config.phone_min_containment).get(main_id)
         visible = bool(faces) or bool(persons)
+        now = time.time()
         obs = Observation(timestamp=now, visible=visible, face_visible=bool(faces), ear=ear, yaw=yaw,
                           pitch=pitch, phone_confidence=phone_conf, source="personal_camera",
                           extra={"people_in_frame": max(len(persons), len(faces))})
@@ -166,10 +184,12 @@ class FocusAI:
             ys = [lm.y * h for lm in faces[0]]
             cv2.rectangle(frame, (int(min(xs)) - 15, int(min(ys)) - 15), (int(max(xs)) + 15, int(max(ys)) + 15), color, 2)
         label = rs.VI_LABELS.get(self.current_state, self.current_state)
-        score = view.get("focus_score")
         cv2.putText(frame, f"{self.current_state} {'' if score is None else score}", (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-        _, buf = cv2.imencode(".jpg", frame)
+        ret, buf = cv2.imencode(".jpg", frame)
+        if not ret or buf is None:
+            print("[CAMERA] cv2.imencode failed to generate JPEG")
+            return None, False, "JPEG_ENCODE_FAILED"
         return buf.tobytes(), self.current_state not in (rs.FOCUS_FOCUSED, rs.FOCUS_UNKNOWN), label
 
     def release(self):
