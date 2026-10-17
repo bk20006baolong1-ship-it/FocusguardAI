@@ -165,11 +165,17 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
     if async_mode is None:
         async_mode = os.environ.get("SOCKETIO_ASYNC_MODE")
     if async_mode is None:
-        try:
-            import eventlet  # noqa: F401
-            async_mode = "eventlet"
-        except ImportError:
+        if os.name == "nt":
+            # On Windows, eventlet without full monkey-patching blocks the main loop
+            # during CPU-heavy computer vision tasks, dropping Socket.IO pings and
+            # causing reconnect loops. Default to threading on Windows.
             async_mode = "threading"
+        else:
+            try:
+                import eventlet  # noqa: F401
+                async_mode = "eventlet"
+            except ImportError:
+                async_mode = "threading"
     socketio = SocketIO(app, cors_allowed_origins=cfg["SOCKETIO_CORS_ORIGINS"], async_mode=async_mode,
                         logger=False, engineio_logger=False)
 
