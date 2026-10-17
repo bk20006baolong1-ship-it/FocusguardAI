@@ -33,7 +33,7 @@ echo [INFO] Dang khoi chay Firebase Emulator o cua so moi...
 start "Firebase Emulator" cmd /k "npx firebase emulators:start --import=./data/firebase --export-on-exit=./data/firebase"
 
 echo [INFO] Dang khoi chay Flask Web Server o cua so moi...
-start "Flask Web Server" cmd /k "call venv\Scripts\activate && python app.py"
+start "Flask Web Server" cmd /k "call venv\Scripts\activate && set SOCKETIO_ASYNC_MODE=threading && python app.py"
 
 echo.
 echo ===================================================
