@@ -28,8 +28,11 @@
     ('teacher_students', 'students', 'fa-user-group', 'Học sinh'),
     ('teacher_attendance', 'attendance', 'fa-clipboard-check', 'Điểm danh'),
     ('teacher_alerts', 'alerts', 'fa-bell', 'Cảnh báo'),
+    ('teacher_events', 'events', 'fa-list-check', 'Sự kiện'),
     ('teacher_analytics', 'analytics', 'fa-chart-column', 'Phân tích'),
     ('teacher_reports', 'reports', 'fa-clock-rotate-left', 'Lịch sử buổi học'),
+    ('teacher_evaluation', 'evaluation', 'fa-flask', 'Đánh giá thực tế'),
+    ('settings_cameras', 'cameras', 'fa-video', 'Camera'),
     ('teacher_settings', 'settings', 'fa-gear', 'Cài đặt'),
   ],
   'parent': [
@@ -38,6 +41,8 @@
   'admin': [
     ('admin_accounts', 'accounts', 'fa-user-shield', 'Tài khoản'),
     ('admin_classes_page', 'classes', 'fa-school', 'Lớp học'),
+    ('admin_privacy_page', 'privacy', 'fa-user-lock', 'Dữ liệu & quyền riêng tư'),
+    ('settings_cameras', 'cameras', 'fa-video', 'Camera'),
   ],
 } %}
 
@@ -65,7 +70,7 @@
     <div class="fg-sidebar-foot">
       <p class="fg-privacy-note mb-0">
         <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
-        <span>Hình ảnh camera được phân tích trực tiếp, không ghi hình và không lưu ảnh.</span>
+        <span data-fg-privacy-notice>{{ privacy_notice }}</span>
       </p>
     </div>
   </aside>

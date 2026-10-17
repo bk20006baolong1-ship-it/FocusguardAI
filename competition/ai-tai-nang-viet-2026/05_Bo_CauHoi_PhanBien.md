@@ -22,7 +22,7 @@ Vì số theo dõi chỉ là số tạm của camera. Khi học sinh bị che ho
 Vì một khung hình có thể sai: chớp mắt trông giống nhắm mắt, liếc nhanh trông giống quay đi. Chờ đủ 1 đến 2 giây liên tục giúp bỏ qua những khoảnh khắc đó, giống như giáo viên không nhắc một bạn chỉ vì bạn ấy chớp mắt.
 
 ## 5. Nếu hai học sinh đi cắt nhau thì sao?
-IdentityManager có khóa danh tính, xác nhận theo thời gian, chống trùng và conflict/recovery. Kịch bản hai người thật vẫn cần thêm volunteer để đánh giá đầy đủ.
+IdentityManager có khóa danh tính, xác nhận theo thời gian, chống trùng và conflict/recovery. Nhóm đã thêm 10 kịch bản kiểm thử nhiều người trên dữ liệu tổng hợp (cắt nhau, đổi số theo dõi, biến mất rồi quay lại, người lạ, che mặt, điện thoại che mặt, đổi góc camera, 5/10/20 học sinh), đều đạt. Đó là kiểm tra logic, không phải độ chính xác thật; kịch bản hai người thật vẫn cần thêm volunteer.
 
 ## 6. Tại sao chớp mắt không bị báo buồn ngủ?
 Chớp mắt rất ngắn. Hệ thống chỉ ghi "Buồn ngủ" khi mắt nhắm liên tục từ 1,5 giây. Ngưỡng "mắt nhắm" cũng tính theo độ mở mắt bình thường của từng bạn, vì mắt mỗi người mở to nhỏ khác nhau.
@@ -40,15 +40,15 @@ Không. Khi mất tín hiệu camera, hệ thống không biết học sinh đan
 Theo thiết kế, nếu khuôn mặt không đủ giống học sinh nào đã đăng ký thì hệ thống để là "chưa nhận diện" thay vì đoán. Phần này đã có kiểm thử tự động, nhưng chưa chạy với người lạ thật trước camera vì cần thêm người thử.
 
 ## 10. Có lưu ảnh/video học sinh không?
-Không ghi video và không lưu khung hình camera. Ảnh đăng ký chỉ nằm trong bộ nhớ lúc trích đặc trưng rồi bỏ. Hệ thống chỉ lưu một dãy số đặc trưng của khuôn mặt, và quản trị viên xóa được.
+Mặc định FocusGuard không lưu video. Evidence Mode là tùy chọn, chỉ lưu đoạn minh chứng ngắn quanh sự kiện khi được phép, giới hạn quyền truy cập và tự động xóa theo retention policy (mặc định tắt; chỉ giáo viên của lớp xem; tự xóa sau 24 giờ). Ảnh đăng ký chỉ nằm trong bộ nhớ lúc trích đặc trưng rồi bỏ. Hệ thống chỉ lưu một dãy số đặc trưng của khuôn mặt khi phụ huynh đã đồng ý; quản trị viên xóa được, phụ huynh thu hồi được.
 
 ## 11. Embedding có nhạy cảm không?
-Có. Vì vậy cần consent phù hợp, kiểm soát quyền truy cập và khả năng xóa.
+Có. Vì vậy máy chủ bắt buộc có đồng ý còn hiệu lực trước khi đăng ký và nhận diện; đồng ý có hạn, thu hồi được (xóa vector ngay); vector có thời hạn lưu, không gửi tới trình duyệt, không ghi log, không xuất file; mọi thao tác nhạy cảm có nhật ký.
 
 ## 12. Độ chính xác hiện bao nhiêu?
-Chưa có con số đáng tin cậy nên nhóm không công bố. Muốn có độ chính xác phải có video lớp học thật, được đồng ý, và có người ghi lại từng giây học sinh đang làm gì để so sánh. Nhóm chưa có bộ dữ liệu đó, nên hồ sơ ghi là chưa đánh giá (NOT_EVALUATED).
+Chưa có con số đáng tin cậy nên nhóm không công bố. Nhóm đã xây xong khung đánh giá: buổi đánh giá có thông tin camera, hoạt động lớp, người quan sát gán nhãn theo thời gian, hệ thống tính precision, recall, F1, cảnh báo sai mỗi giờ, và ghi "chưa đủ dữ liệu" thay vì 0% khi thiếu nhãn. Nhóm chưa chạy khung này trong lớp thật có đồng ý, nên hồ sơ vẫn ghi là chưa đánh giá (NOT_EVALUATED).
 
-## 13. 184 bài kiểm thử chứng minh gì?
+## 13. 675 bài kiểm thử chứng minh gì?
 Chứng minh mã chạy đúng thiết kế: quy tắc tính điểm, ngưỡng thời gian, phân quyền, giao diện. Chúng không chứng minh AI nhận đúng bao nhiêu phần trăm trong lớp học thật.
 
 ## 14. Camera thật đã thử chưa?
@@ -78,8 +78,14 @@ Không phải một mô hình AI mới. Điểm riêng là cách ghép các mô 
 ## 22. Nếu BTC yêu cầu đổi UX trong thời gian ngắn?
 Hiểu change-request → xác định screen/contract → sửa bounded → test regression → demo lại.
 
+## 22b. Cúi đầu chép bài có bị tính là mất tập trung không?
+Không nhất thiết. Giáo viên chọn hoạt động lớp (nghe giảng, chép bài, nhìn bảng, thảo luận nhóm, tự học, kiểm tra, chuyển hoạt động). Khi đang "Chép bài", cúi đầu không bị trừ điểm và không báo; khi "Thảo luận nhóm", quay sang bạn không bị coi là mất tập trung; khi "Kiểm tra", dùng điện thoại vẫn được báo ở mức cao. AI không tự đoán hoạt động. Tín hiệu gốc vẫn được lưu để giáo viên xem lại. Các hệ số hiện là giá trị khởi đầu, sẽ hiệu chỉnh bằng dữ liệu thật.
+
+## 22c. AI báo sai thì sao?
+Giáo viên mở trang Sự kiện, xem lại và bấm "Xác nhận đúng", "Báo nhầm" hoặc "Không chắc", có thể ghi chú. Sự kiện gốc của AI không bị sửa. Tỷ lệ báo nhầm do giáo viên xác nhận được thống kê theo từng loại tín hiệu để hiệu chỉnh hệ thống.
+
 ## 23. Hạn chế lớn nhất?
-Chưa có đánh giá trên dữ liệu thật có gán nhãn; chưa thử nhiều người và người lạ với camera thật; phát hiện điện thoại còn đứt đoạn; dữ liệu khuôn mặt là dữ liệu nhạy cảm nên cần quản lý nghiêm túc.
+Chưa có đánh giá trên dữ liệu thật có gán nhãn (khung đánh giá đã có nhưng chưa chạy trong lớp); chưa thử nhiều người và người lạ với camera thật; ngưỡng chưa hiệu chỉnh bằng dữ liệu thật; phát hiện điện thoại còn đứt đoạn; dữ liệu khuôn mặt là dữ liệu nhạy cảm nên cần quản lý nghiêm túc.
 
 ## 24. Bước tiếp theo quan trọng nhất?
 Làm một đợt đánh giá nhỏ có sự đồng ý và có người gán nhãn, để báo cáo trung thực tỷ lệ phát hiện đúng và cảnh báo sai; đồng thời cải thiện phát hiện điện thoại.

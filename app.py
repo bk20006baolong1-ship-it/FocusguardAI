@@ -6,6 +6,7 @@ import functools
 import json
 import threading
 import time
+from types import SimpleNamespace
 
 from flask import (Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for)
 from flask_socketio import SocketIO, disconnect, emit, join_room
@@ -13,7 +14,15 @@ from flask_socketio import SocketIO, disconnect, emit, join_room
 from repository import load_dotenv
 from focusguard import authz, camera_state, realtime
 from focusguard import runtime_state as rs
-from focusguard.security import build_flask_config
+from focusguard.policies.contexts import ACTIVITY_CONTEXTS, CONTEXT_LABELS_VI
+from focusguard.privacy import audit as audit_actions
+from focusguard.privacy import policy_texts, privacy_notice
+from focusguard.privacy.consent import SCOPE_FACE
+from focusguard.security import build_flask_config, cross_site_write
+from focusguard.web_routes import register_feedback_routes
+from focusguard.camera_routes import register_camera_routes, _public_health
+from focusguard.identity_routes import register_identity_routes
+from focusguard.cameras.service import CameraError
 
 load_dotenv()
 
@@ -45,33 +54,26 @@ class CameraHub:
         self.generation = 0
         self.starting_key = None      # set while a pipeline (camera + models) is loading
         self.failed_key = None        # last key whose pipeline could not be started
-        self._last_frame_out = None
-        self._last_frame_time = 0.0
 
     def acquire(self, key, factory):
         with self.lock:
             if self.pipeline is not None and self.key != key:
-                print(f"[CAMERA] Switching key from {self.key} to {key}, closing old pipeline")
                 self._close()
             if self.pipeline is None:
                 self.starting_key = key
                 self.failed_key = None
-                print(f"[CAMERA] Initializing pipeline for key={key}...")
                 try:
                     self.pipeline = factory()
                 except Exception as exc:
                     self.failed_key = key
-                    print(f"[CAMERA] Pipeline failed to start for key={key}: {exc}")
+                    print("[CAMERA] pipeline failed to start:", exc)   # details stay server-side
                     raise
                 finally:
                     self.starting_key = None
                 self.key = key
                 self.users = 0
                 self.generation += 1
-                self._last_frame_out = None
-                print(f"[CAMERA] Pipeline initialized successfully, key={key}, generation={self.generation}")
             self.users += 1
-            print(f"[CAMERA] Viewer acquired generation={self.generation}, total viewers={self.users}")
             return self.pipeline, self.generation
 
     def describe(self, matches):
@@ -79,13 +81,27 @@ class CameraHub:
         called from status endpoints while a pipeline may be loading)."""
         pipeline, key = self.pipeline, self.key
         streaming = pipeline is not None and key is not None and matches(key)
+        health = None
+        if streaming and hasattr(pipeline, "camera_health"):
+            try:
+                health = pipeline.camera_health()
+            except Exception:
+                health = None
         return {
             "starting": self.starting_key is not None and matches(self.starting_key),
             "failed": self.failed_key is not None and matches(self.failed_key),
             "streaming": streaming,
             "viewers": self.users if streaming else 0,
             "device_ok": getattr(pipeline, "device_ok", None) if streaming else None,
+            "reconnecting": bool(health) and health.get("state") == "RECONNECTING",
+            "health": health,
         }
+
+    def uses_device(self, predicate):
+        """Is a running pipeline reading a source that matches ``predicate(source)``?"""
+        pipeline = self.pipeline
+        src = getattr(pipeline, "source", None)
+        return pipeline is not None and src is not None and predicate(src)
 
     def is_current(self, generation):
         return self.pipeline is not None and self.generation == generation
@@ -95,14 +111,7 @@ class CameraHub:
             pipeline = self.pipeline
             if pipeline is None or self.generation != generation:
                 return None
-            now = time.time()
-            if self._last_frame_out is not None and (now - self._last_frame_time) < 0.05:
-                return self._last_frame_out
-            out = pipeline.get_frame()
-            if out is not None and out[0] is not None:
-                self._last_frame_time = now
-                self._last_frame_out = out
-            return out
+            return pipeline.get_frame()
 
     def release(self, generation):
         """A viewer of ``generation`` left."""
@@ -110,37 +119,39 @@ class CameraHub:
             if self.pipeline is None or generation != self.generation:
                 return
             self.users -= 1
-            print(f"[CAMERA] Viewer released generation={generation}, remaining viewers={self.users}")
             if self.users <= 0:
-                print(f"[CAMERA] No viewers remaining for generation={generation}, closing pipeline")
                 self._close()
 
-    def force_release(self, predicate=None):
-        """Close the pipeline now (e.g. class ended) if its key matches."""
+    def force_release(self, predicate=None, final=False):
+        """Close the pipeline now (e.g. class ended) if its key matches. ``final``: the session
+        itself ended (not just the last viewer leaving)."""
         with self.lock:
             if self.pipeline is not None and (predicate is None or predicate(self.key)):
-                self._close()
+                self._close(final=final)
             if self.failed_key is not None and (predicate is None or predicate(self.failed_key)):
                 self.failed_key = None
 
-    def _close(self):
+    def _close(self, final=False):
         try:
-            if self.pipeline is not None:
-                print(f"[CAMERA] Releasing hardware for key={self.key}...")
+            try:
+                self.pipeline.release(final=True) if final else self.pipeline.release()
+            except TypeError:                     # a pipeline without the ``final`` flag
                 self.pipeline.release()
-                time.sleep(0.15)
         except Exception as exc:
             print("[CAMERA] release error:", exc)
         self.pipeline = None
         self.key = None
         self.users = 0
         self.generation += 1
-        self._last_frame_out = None
 
 
 def create_app(repo=None, env=None, async_mode=None, start_background=True, session_manager=None):
     cfg = build_flask_config(env)
     app = Flask(__name__)
+    if cfg["TRUST_PROXY"]:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        n = cfg["TRUST_PROXY"]
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=n, x_proto=n, x_host=n, x_port=n)
     app.config.update(
         SECRET_KEY=cfg["SECRET_KEY"],
         SESSION_COOKIE_HTTPONLY=cfg["SESSION_COOKIE_HTTPONLY"],
@@ -154,14 +165,11 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
     if async_mode is None:
         async_mode = os.environ.get("SOCKETIO_ASYNC_MODE")
     if async_mode is None:
-        if os.name == "nt":
+        try:
+            import eventlet  # noqa: F401
+            async_mode = "eventlet"
+        except ImportError:
             async_mode = "threading"
-        else:
-            try:
-                import eventlet  # noqa: F401
-                async_mode = "eventlet"
-            except ImportError:
-                async_mode = "threading"
     socketio = SocketIO(app, cors_allowed_origins=cfg["SOCKETIO_CORS_ORIGINS"], async_mode=async_mode,
                         logger=False, engineio_logger=False)
 
@@ -181,6 +189,7 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
     cameras = CameraHub()
     teacher_settings = {}
     app.extensions["focusguard"] = {"session_manager": sm, "socketio": socketio, "cameras": cameras}
+    sm.consent.record_policy_change()     # consent policy version bump -> one POLICY_CHANGED audit
 
     # ------------------------------------------------------------ auth helpers
     def current_principal():
@@ -191,13 +200,24 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
     def api_error(message=MSG_FORBIDDEN, code=403):
         return jsonify({"status": "error", "message": message}), code
 
+    @app.before_request
+    def _csrf_origin_guard():
+        # SameSite=Lax cookies + this same-origin check on every state-changing request.
+        if cross_site_write(request.method, request.host, request.headers.get("Origin"),
+                            request.headers.get("Referer"), cfg["SOCKETIO_CORS_ORIGINS"] or ()):
+            if request.path.startswith("/api/"):
+                return api_error("Yêu cầu bị chặn: không đến từ trang FocusGuard.", 403)
+            return "Forbidden", 403
+
     ROLE_LABELS = {"student": "Học sinh", "teacher": "Giáo viên", "parent": "Phụ huynh", "admin": "Quản trị viên"}
 
     @app.context_processor
     def inject_shell():
         role = session.get("role")
         return {"shell_role": role, "shell_role_label": ROLE_LABELS.get(role, ""),
-                "shell_name": session.get("display_name") or session.get("user") or ""}
+                "shell_name": session.get("display_name") or session.get("user") or "",
+                # One privacy sentence for every page (focusguard/privacy/policy.py).
+                "privacy_notice": privacy_notice(sm.privacy), "evidence_enabled": sm.privacy.evidence_enabled}
 
     def wants_json():
         return request.path.startswith("/api/") or request.path.startswith("/socket.io")
@@ -328,6 +348,7 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
             if current is not None and int_arg("class_id") == current:
                 session["class_id"] = current      # remember the (authorised) class across pages
             return render_template("teacher.html", active_tab=tab,
+                                   activity_contexts=[(c, CONTEXT_LABELS_VI[c]) for c in ACTIVITY_CONTEXTS],
                                    teacher_name=session.get("display_name", "Giáo viên"),
                                    class_name=repo.get_class_name(current) if current else None,
                                    teacher_classes=classes, current_class_id=current,
@@ -335,7 +356,8 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
         view.__name__ = f"teacher_{tab}"
         return view
 
-    for tab in ("dashboard", "students", "analytics", "reports", "alerts", "settings", "attendance"):
+    for tab in ("dashboard", "students", "analytics", "reports", "alerts", "events", "evaluation", "settings",
+                "attendance"):
         endpoint = "teacher_dashboard" if tab == "dashboard" else f"teacher_{tab}"
         app.add_url_rule(f"/teacher/{tab}", endpoint, teacher_page(tab))
 
@@ -345,7 +367,8 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
         sid = p.linked_student_id
         student = repo.get_user_by_id(sid) if sid else None
         if not student:
-            return render_template("parent.html", student_name=None, linked=False,
+            return render_template("parent.html", student_name=None, linked=False, consent=None,
+                                   student_id=None, policy=policy_texts(sm.privacy),
                                    profile_stats=sm.student_profile(-1), recommendations=None,
                                    heatmap_data={}, comparison=[], attendance=[], attendance_summary=None)
         attendance = sm.student_attendance_history(sid)
@@ -355,8 +378,10 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
             "rate": int(round(100.0 * attended / len(attendance))),
             "away_count": sum(a.get("away_count") or 0 for a in attendance),
         }
+        consent = sm.consent.status(sid)
         return render_template(
-            "parent.html", student_name=student.get("display_name"), linked=True,
+            "parent.html", student_name=student.get("display_name"), linked=True, consent=consent,
+            student_id=sid, policy=policy_texts(sm.privacy),
             profile_stats=sm.student_profile(sid), recommendations=sm.student_recommendation(sid),
             heatmap_data=sm.student_heatmap(sid), comparison=sm.student_session_comparison(sid, 7),
             attendance=attendance[:10], attendance_summary=attendance_summary)
@@ -401,31 +426,16 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
     def stream(pipeline_key, factory, keep_running):
         def gen():
             generation = None
-            client_tag = f"{pipeline_key[0]}:{pipeline_key[1] if len(pipeline_key) > 1 else 'stream'}"
-            frame_count = 0
             try:
-                pipeline, generation = cameras.acquire(pipeline_key, factory)
-                print(f"[STREAM] Connected {client_tag}, generation={generation}")
+                _, generation = cameras.acquire(pipeline_key, factory)
                 while keep_running() and cameras.is_current(generation):
+                    socketio.sleep(0.05)
                     out = cameras.read(generation)
                     if out is None or out[0] is None:
-                        socketio.sleep(0.04)
                         continue
-                    frame_bytes = out[0]
-                    if not frame_bytes:
-                        socketio.sleep(0.04)
-                        continue
-                    frame_count += 1
-                    if frame_count == 1:
-                        print(f"[STREAM] First frame sent ({len(frame_bytes)} bytes) for {client_tag}")
-                    elif frame_count % 100 == 0:
-                        print(f"[STREAM] {frame_count} frames sent for {client_tag}")
-                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
-                    socketio.sleep(0.02)
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + out[0] + b"\r\n"
             except GeneratorExit:
-                print(f"[STREAM] HTTP stream disconnected ({client_tag}) after {frame_count} frames")
-            except Exception as exc:
-                print(f"[STREAM] Error streaming {client_tag}: {exc}")
+                pass
             finally:
                 if generation is not None:
                     cameras.release(generation)
@@ -444,10 +454,20 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
             if rt is None:
                 return api_error("Lớp học chưa bắt đầu giám sát bằng camera.", 409)
             cs_id = rt.class_session_id
+            camera_id = (rt.camera or {}).get("camera_id")
 
             def factory():
+                if sm.classroom_pipeline_factory is not None:      # dev/test simulator only
+                    return sm.classroom_pipeline_factory(sm, cid, cs_id)
                 from classroom_ai import ClassroomAI
-                return ClassroomAI(sm, cid, class_session_id=cs_id)
+                sm.cameras.sweep_previews()       # an expired preview must not hold the device
+                source = None
+                if camera_id:                     # a saved IP camera / webcam; None = local webcam 0
+                    cam = repo.get_camera(camera_id)
+                    if cam is None:
+                        raise RuntimeError("camera was deleted")
+                    source = sm.cameras.open_source(cam)
+                return ClassroomAI(sm, cid, class_session_id=cs_id, source=source)
             # Bound to this exact classroom session: stops if the class ends or
             # another (e.g. online) session replaces it.
             return stream(("classroom", cid, cs_id), factory,
@@ -594,6 +614,10 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
             return api_error()
         return jsonify(sm.class_leaderboard_today(cid))
 
+    # Admin-editable behaviour thresholds and their sane ranges.
+    SETTINGS_RANGES = {"ear_threshold": (0.10, 0.40), "drowsy_min_seconds": (0.5, 10.0),
+                       "head_away_min_seconds": (0.5, 30.0)}
+
     @app.route("/api/settings", methods=["GET", "POST"])
     @api_auth()
     def manage_settings(p):
@@ -611,12 +635,22 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
                             "message": "Đã lưu tuỳ chọn cá nhân. Ngưỡng nhận diện do quản trị viên cấu hình."})
         data = request.get_json(silent=True) or {}
         try:
-            sm.config = sm.config.with_behavior(
-                ear_threshold=float(data.get("ear_threshold", beh.ear_threshold)),
-                drowsy_min_seconds=float(data.get("drowsy_threshold", beh.drowsy_min_seconds)),
-                head_away_min_seconds=float(data.get("distraction_threshold", beh.head_away_min_seconds)))
+            values = {"ear_threshold": float(data.get("ear_threshold", beh.ear_threshold)),
+                      "drowsy_min_seconds": float(data.get("drowsy_threshold", beh.drowsy_min_seconds)),
+                      "head_away_min_seconds": float(data.get("distraction_threshold", beh.head_away_min_seconds))}
         except (TypeError, ValueError):
             return api_error("Giá trị không hợp lệ", 400)
+        for key, (lo, hi) in SETTINGS_RANGES.items():
+            if not lo <= values[key] <= hi:     # also rejects NaN
+                return api_error(f"Giá trị {key} phải trong khoảng {lo}–{hi}.", 400)
+        sm.config = sm.config.with_behavior(**values)
+        new = sm.config.behavior
+        sm.audit.record(audit_actions.POLICY_CHANGED, p, None, {
+            "kind": "behavior_thresholds",
+            "before": {"ear_threshold": beh.ear_threshold, "drowsy_min_seconds": beh.drowsy_min_seconds,
+                       "head_away_min_seconds": beh.head_away_min_seconds},
+            "after": {"ear_threshold": new.ear_threshold, "drowsy_min_seconds": new.drowsy_min_seconds,
+                      "head_away_min_seconds": new.head_away_min_seconds}})
         return jsonify({"status": "success", "message": "Cấu hình áp dụng cho phiên học mới."})
 
     # ----------------------------------------------------------- teacher API
@@ -629,15 +663,25 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
         if view["active"] and view["mode"] == "classroom":
             hub = cameras.describe(lambda key: key[:2] == ("classroom", cid))
             camera = camera_state.describe(camera_state.derive(True, hub, view["camera_status"]))
+            rt = sm.class_runtime(cid)
+            camera["source"] = (getattr(rt, "camera", None) if rt is not None else None) or \
+                {"camera_id": None, "camera_name": "Webcam 0 (mặc định)", "camera_source_type": "WEBCAM"}
+            camera["health"] = _public_health(hub.get("health"))
         return {
             "status": "success", "class_id": cid, "class_name": repo.get_class_name(cid),
             "students": view["students"], "statistics": view["statistics"],
             "class_session_active": view["active"], "mode": view["mode"],
             "mode_label": MODE_LABELS.get(view["mode"]),
             "class_session_id": view["class_session_id"],
+            "phase": view.get("phase"), "attendance_finalized": view.get("attendance_finalized", False),
             "started_at": view["started_at"], "elapsed_seconds": view["elapsed_seconds"],
             "server_time": time.time(), "camera": camera, "camera_status": view["camera_status"],
             "logs": view["logs"],
+            # Teacher-chosen activity context (never inferred by the AI).
+            "activity_context": view.get("activity_context"),
+            "activity_context_label": CONTEXT_LABELS_VI.get(view.get("activity_context")),
+            "context_history": view.get("context_history", []),
+            "policy_version": view.get("policy_version") or sm.policy.version,
         }
 
     @app.route("/api/teacher/class_status")
@@ -666,7 +710,18 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
                                  "Hãy kết thúc buổi đó trước.", 409)
             if not repo.get_students_in_class(cid):
                 return api_error("Lớp này chưa có học sinh. Hãy thêm học sinh trước khi bắt đầu.", 409)
-            rt = sm.start_class(cid, mode=mode, started_by=p.user_id)
+            camera = None
+            if mode == "classroom":
+                # Assigned class camera -> teacher default -> ask; no camera configured = webcam 0.
+                try:
+                    cam, reason = sm.cameras.resolve_for_class(p, cid, data.get("camera_id") or None)
+                except CameraError as exc:
+                    return api_error(exc.message, exc.status)
+                if reason == "CHOOSE":
+                    return api_error("Hãy chọn camera cho buổi học (Cài đặt › Camera để đặt camera mặc định).", 409)
+                camera = sm.cameras.evaluation_metadata(cam) if cam is not None else None
+            rt = sm.start_class(cid, mode=mode, started_by=p.user_id, camera=camera,
+                                initialize=bool(data.get("initialize")) and mode == "classroom")
         socketio.emit("class_started", {"message": "Giáo viên đã bắt đầu buổi học", "class_id": cid},
                       room=realtime.class_students_room(cid))
         socketio.emit("class_snapshot", class_payload(cid), room=realtime.teacher_room(cid))
@@ -683,7 +738,7 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
             if rt is None:
                 return jsonify({"status": "success", "was_active": False, "class_id": cid,
                                 "class_session_id": None, "message": "Không có buổi học đang diễn ra."})
-            cameras.force_release(lambda key: key[:2] == ("classroom", cid))
+            cameras.force_release(lambda key: key[:2] == ("classroom", cid), final=True)
             result = sm.end_class(cid)
         socketio.emit("class_ended", {"message": "Giáo viên đã kết thúc buổi học", "class_id": cid},
                       room=realtime.class_students_room(cid))
@@ -820,6 +875,13 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
     def admin_classes_page(p):
         return render_template("admin.html", active_tab="classes")
 
+    @app.route("/admin/privacy")
+    @login_required_page(authz.ROLE_ADMIN)
+    def admin_privacy_page(p):
+        return render_template("admin.html", active_tab="privacy", policy=policy_texts(sm.privacy),
+                               audit_actions=[(a, audit_actions.ACTION_LABELS_VI.get(a, a))
+                                              for a in audit_actions.ACTIONS])
+
     def op_result(ok, msg):
         # A failed operation is an HTTP error too, so clients cannot mistake it for success.
         return jsonify({"status": "success" if ok else "error", "message": msg}), (200 if ok else 409)
@@ -886,7 +948,10 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
         username, password, display_name, role, class_id, student_id = _user_payload()
         if not username or not display_name or not role:
             return api_error("Vui lòng nhập đầy đủ thông tin", 400)
+        old = repo.get_user_by_id(user_id)
         ok, msg = repo.update_user(user_id, username, password, display_name, role, class_id, student_id)
+        if ok and old and old.get("role") == "student" and role != "student":
+            _purge_student_biometrics(p, user_id, "role_changed")   # face data must not follow a non-student
         return op_result(ok, msg)
 
     @app.route("/api/admin/delete_user/<int:user_id>", methods=["POST", "DELETE"])
@@ -894,8 +959,26 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
     def admin_delete_user(p, user_id):
         if user_id == p.user_id:
             return api_error("Không thể tự xóa tài khoản đang đăng nhập.", 400)
-        ok, msg = repo.delete_user(user_id)
+        old = repo.get_user_by_id(user_id)
+        had_face = bool(old and old.get("role") == "student" and repo.get_face_enrollment(user_id)["has_face"])
+        ok, msg = repo.delete_user(user_id)        # the embedding lives in the user row and goes with it
+        if ok and old and old.get("role") == "student":
+            _purge_student_biometrics(p, user_id, "account_deleted", had_face=had_face)
         return op_result(ok, msg)
+
+    def _purge_student_biometrics(actor, student_id, reason, had_face=None):
+        """Called after a successful delete / role change: face embedding + evidence
+        clips go too (audited); consent records and the audit log are kept as the
+        record of what happened."""
+        sm.evidence.cancel_pending(student_id)
+        if had_face is None:
+            had_face = repo.get_face_enrollment(student_id)["has_face"]
+            if had_face:
+                repo.save_face_embedding(int(student_id), None)
+        if had_face:
+            sm.audit.record(audit_actions.FACE_DELETED, actor, student_id, {"reason": reason})
+        sm.evidence.delete_for_student(student_id, actor, reason=reason)
+        _refresh_classroom_gallery()
 
     recognizer_box = {}
 
@@ -928,6 +1011,11 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
         target = repo.get_user_by_id(user_id) if user_id is not None else None
         if not target or target.get("role") != "student" or not images:
             return api_error("Thiếu thông tin học sinh hoặc hình ảnh", 400)
+        # Consent is decided on the server from the consent record; a client
+        # flag such as {"consent": true} is ignored.
+        if not sm.consent.has_scope(target["id"], SCOPE_FACE):
+            return api_error("Chưa có đồng ý nhận diện khuôn mặt còn hiệu lực cho học sinh này. "
+                             "Hãy ghi nhận đồng ý của phụ huynh trước khi đăng ký.", 403)
         imgs = []
         for b64 in images[:10]:
             try:
@@ -939,17 +1027,22 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
         if not imgs:
             return api_error("Không có hình ảnh hợp lệ để trích xuất", 400)
         try:
-            embedding = face_recognizer().register_student(imgs)
+            recognizer = face_recognizer()
+            embeddings = [e for e in (recognizer.extract_embedding(img) for img in imgs) if e is not None]
         except Exception:
             app.logger.exception("register_face failed")
             return api_error("Không thể xử lý ảnh lúc này. Vui lòng thử lại.", 500)
-        if embedding is None:
+        if not embeddings:
             return api_error("Không phát hiện thấy khuôn mặt rõ ràng trong các bức ảnh", 400)
-        # Only the embedding is stored; no face photo is written to disk.
-        if not repo.save_face_embedding(target["id"], json.dumps(embedding)):
+        # Multi-template profile: each usable photo's embedding (diverse ones kept); no photo is written.
+        n = sm.faces.replace_from_photos(target["id"], embeddings, actor=p)
+        if not n:
             return api_error("Không thể lưu đặc trưng vào cơ sở dữ liệu", 500)
+        sm.audit.record(audit_actions.FACE_ENROLLED, p, target["id"], {"images": len(imgs), "templates": n})
         _refresh_classroom_gallery()
-        return jsonify({"status": "success", "message": "Đăng ký khuôn mặt thành công. Chỉ lưu vector đặc trưng."})
+        st = sm.faces.status(target["id"])
+        return jsonify({"status": "success", "enrollment": st,
+                        "message": f"Đăng ký khuôn mặt thành công ({st['summary']}). Chỉ lưu vector đặc trưng."})
 
     @app.route("/api/admin/reset_face", methods=["POST"])
     @api_auth(authz.ROLE_ADMIN)
@@ -958,7 +1051,10 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
             user_id = int((request.get_json(silent=True) or {}).get("user_id"))
         except (TypeError, ValueError):
             return api_error("Thiếu thông tin user_id", 400)
+        existed = repo.get_face_enrollment(user_id)["has_face"]
         repo.save_face_embedding(user_id, None)
+        if existed:
+            sm.audit.record(audit_actions.FACE_DELETED, p, user_id, {"reason": "admin_request"})
         legacy = os.path.join(app.static_folder, "uploads", "avatars", f"student_{user_id}.jpg")
         if os.path.exists(legacy):
             os.remove(legacy)
@@ -991,6 +1087,21 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
         except Exception:
             app.logger.exception("detect_face failed")
             return api_error("Không thể xử lý ảnh lúc này. Vui lòng thử lại.", 500)
+
+    sm.face_listeners.append(lambda _sid: _refresh_classroom_gallery())
+
+    def broadcast_class(cid):
+        socketio.emit("class_snapshot", class_payload(cid), room=realtime.teacher_room(cid))
+
+    register_feedback_routes(app, sm, SimpleNamespace(
+        current_principal=current_principal, api_auth=api_auth, api_error=api_error, int_arg=int_arg,
+        teacher_class_id=teacher_class_id, broadcast_class=broadcast_class))
+    register_identity_routes(app, sm, SimpleNamespace(
+        api_auth=api_auth, api_error=api_error, teacher_class_id=teacher_class_id, cameras=cameras,
+        broadcast_class=broadcast_class))
+    register_camera_routes(app, sm, SimpleNamespace(
+        api_auth=api_auth, api_error=api_error, login_required_page=login_required_page,
+        teacher_class_id=teacher_class_id, cameras=cameras, sleep=socketio.sleep))
 
     # ------------------------------------------------------------- Socket.IO
     def socket_principal():
@@ -1101,8 +1212,21 @@ def create_app(repo=None, env=None, async_mode=None, start_background=True, sess
             except Exception as exc:
                 print("[BG] broadcaster error:", exc)
 
+    def retention_sweeper():
+        # Scheduled cleanup: expired evidence clips, embeddings, old metadata.
+        # First pass right after start-up (a server restarted often still cleans up),
+        # then every RETENTION_SWEEP_MINUTES.
+        socketio.sleep(5.0)
+        while True:
+            try:
+                sm.retention.run()
+            except Exception as exc:
+                print("[BG] retention error:", exc)
+            socketio.sleep(sm.privacy.retention_sweep_minutes * 60.0)
+
     if start_background:
         socketio.start_background_task(broadcaster)
+        socketio.start_background_task(retention_sweeper)
 
     app.extensions["focusguard"]["broadcaster"] = broadcaster
     return app, socketio

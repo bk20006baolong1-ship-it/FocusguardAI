@@ -26,22 +26,30 @@ def _feed(rt, sid, t0, t1, dt, make_obs):
         t += dt
 
 
-def test_1_focused_10_seconds_adds_half_point():
-    """1. Học sinh tập trung trong 10 giây: điểm tăng đúng 0,5 điểm (+0,05 điểm/giây)."""
-    cfg = PipelineConfig(focus=FocusConfig(recovery_per_second=0.05, initial_score=80.0))
+def test_1_focused_30_seconds_adds_half_point():
+    """1. Học sinh tập trung hợp lệ: chỉ cộng +0,5 điểm sau mỗi 30 giây (không cộng liên tục từng frame)."""
+    cfg = PipelineConfig(focus=FocusConfig(initial_score=80.0))
     rt = SessionRuntime(enrolled=[{"student_id": 1, "display_name": "Test"}], started_at=100.0, config=cfg)
 
     # First observation initializes score to 80.0
     rt.process_frame(100.0, {1: Observation(timestamp=100.0, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0)})
     assert rt.states[1].focus_score == pytest.approx(80.0)
 
-    # Feed 10.0 seconds of continuous focused observations at 10 Hz
-    _feed(rt, 1, 100.1, 110.0, 0.1,
+    # Feed 25.0 seconds of continuous focused observations at 10 Hz (< 30s): no points added
+    _feed(rt, 1, 100.1, 125.0, 0.1,
           lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0))
+    assert rt.states[1].focus_score == pytest.approx(80.0, abs=1e-3)
 
-    # Score should have increased by exactly 10.0 * 0.05 = 0.5 points
+    # Reach 30.0 seconds of valid focus: exactly +0.5 points awarded
+    _feed(rt, 1, 125.1, 130.0, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0))
     assert rt.states[1].focus_state == rs.FOCUS_FOCUSED
     assert rt.states[1].focus_score == pytest.approx(80.5, abs=1e-3)
+
+    # Reach 60.0 seconds of valid focus: another +0.5 -> total +1.0
+    _feed(rt, 1, 130.1, 160.0, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0))
+    assert rt.states[1].focus_score == pytest.approx(81.0, abs=1e-3)
 
 
 def test_2_closed_eyes_15_to_20_seconds_detects_drowsy_and_penalizes():
@@ -408,4 +416,129 @@ def test_14_turning_head_back_with_eyes_closed_retains_drowsy_state():
     # Must NOT become FOCUSED; must remain DROWSY
     assert rt.states[1].focus_state == rs.FOCUS_DROWSY
     assert "DROWSY" in rt.states[1].active_episodes
+
+
+def test_15_head_away_requires_7_seconds_continuous_before_penalizing():
+    """15. Ngoảnh mặt dưới 7 giây rồi quay lại: không bị trừ điểm. Ngoảnh mặt đủ 7 giây: bắt đầu trừ điểm."""
+    cfg = PipelineConfig(
+        behavior=BehaviorConfig(head_away_min_seconds=7.0),
+        focus=FocusConfig(initial_score=100.0)
+    )
+    rt = SessionRuntime(enrolled=[{"student_id": 1, "display_name": "Test"}], started_at=100.0, config=cfg)
+
+    # 1. First observation facing center: 100.0
+    rt.process_frame(100.0, {1: Observation(timestamp=100.0, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0)})
+    assert rt.states[1].focus_score == pytest.approx(100.0)
+
+    # 2. Turn head away for 5.0 seconds (< 7.0s): NO episode started, NO penalty
+    _feed(rt, 1, 100.1, 105.0, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=35.0, pitch=0.0))
+    assert rt.states[1].focus_state == rs.FOCUS_FOCUSED
+    assert "HEAD_AWAY" not in rt.states[1].active_episodes
+    assert rt.states[1].focus_score == pytest.approx(100.0)
+
+    # 3. Turn head back to center for 2.0 seconds: remains focused and full score
+    _feed(rt, 1, 105.1, 107.0, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0))
+    assert rt.states[1].focus_state == rs.FOCUS_FOCUSED
+    assert rt.states[1].focus_score == pytest.approx(100.0)
+
+    # 4. Turn head away continuously for 7.0 seconds: episode starts, penalty applies
+    _feed(rt, 1, 107.1, 114.1, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=35.0, pitch=0.0))
+    assert rt.states[1].focus_state == rs.FOCUS_HEAD_AWAY
+    assert "HEAD_AWAY" in rt.states[1].active_episodes
+
+    # 5. Continue turning head for another 3.0 seconds: score is penalized according to rate
+    score_at_confirm = rt.states[1].focus_score
+    _feed(rt, 1, 114.2, 117.2, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=35.0, pitch=0.0))
+    assert rt.states[1].focus_score < score_at_confirm
+
+    # 6. Turn head back to center: episode ends cleanly and penalty stops
+    _feed(rt, 1, 117.3, 119.0, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0))
+    assert rt.states[1].focus_state == rs.FOCUS_FOCUSED
+    assert "HEAD_AWAY" not in rt.states[1].active_episodes
+
+
+def test_16_head_away_persists_across_tracking_id_changes_for_same_student():
+    """16. Đổi track_id nhưng cùng student_id: bộ đếm 7 giây không bị xóa/khởi động lại từ đầu."""
+    cfg = PipelineConfig(
+        behavior=BehaviorConfig(head_away_min_seconds=7.0),
+        focus=FocusConfig(initial_score=100.0)
+    )
+    rt = SessionRuntime(enrolled=[{"student_id": 1, "display_name": "Test"}], started_at=100.0, config=cfg)
+
+    # Start facing center
+    rt.process_frame(100.0, {1: Observation(timestamp=100.0, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0, track_id=1)})
+
+    # Head away with track_id=1 for 4.0 seconds (100.1 -> 104.0)
+    _feed(rt, 1, 100.1, 104.0, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=35.0, pitch=0.0, track_id=1))
+    assert rt.states[1].focus_state == rs.FOCUS_FOCUSED
+
+    # Tracker reassigns track_id=2 for the SAME student_id=1 (with a brief 0.1s frame switch)
+    # Continue head away with track_id=2 for 3.2 seconds (total 7.2s head away)
+    _feed(rt, 1, 104.1, 107.3, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=35.0, pitch=0.0, track_id=2))
+
+    # At 7.2s total head away duration, HEAD_AWAY episode MUST be active even though track_id switched!
+    assert rt.states[1].focus_state == rs.FOCUS_HEAD_AWAY
+    assert "HEAD_AWAY" in rt.states[1].active_episodes
+
+
+def test_17_focus_recovery_resets_streak_on_distraction():
+    """17. Tập trung 20s (chưa đủ 30s), sau đó vi phạm HEAD_AWAY: chuỗi 30s bị reset, không cộng dồn bù."""
+    cfg = PipelineConfig(
+        behavior=BehaviorConfig(head_away_min_seconds=7.0),
+        focus=FocusConfig(initial_score=80.0)
+    )
+    rt = SessionRuntime(enrolled=[{"student_id": 1, "display_name": "Test"}], started_at=100.0, config=cfg)
+
+    # Initialize at 80.0
+    rt.process_frame(100.0, {1: Observation(timestamp=100.0, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0)})
+
+    # Focus for 20.0s (accumulated 20s < 30s): score remains 80.0
+    _feed(rt, 1, 100.1, 120.0, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0))
+    assert rt.states[1].focus_score == pytest.approx(80.0)
+
+    # Distraction for 8s (becomes HEAD_AWAY): streak resets to 0.0, penalty applied
+    _feed(rt, 1, 120.1, 128.1, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=35.0, pitch=0.0))
+    assert rt.states[1].focus_state == rs.FOCUS_HEAD_AWAY
+    # Turn back to center: after gap tolerance (0.6s), state returns to FOCUSED and starts new streak
+    _feed(rt, 1, 128.2, 128.8, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0))
+    assert rt.states[1].focus_state == rs.FOCUS_FOCUSED
+    score_when_focused = rt.states[1].focus_score
+
+    # Focus for 20s on new streak (accumulated 20s < 30s): score does NOT increase yet
+    _feed(rt, 1, 128.9, 148.8, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0))
+    assert rt.states[1].focus_score == pytest.approx(score_when_focused, abs=1e-3)
+
+    # Reach 30s on the new streak: exactly +0.5 added!
+    _feed(rt, 1, 148.9, 158.8, 0.1,
+          lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0))
+    assert rt.states[1].focus_score == pytest.approx(score_when_focused + 0.5, abs=1e-3)
+
+
+def test_18_focus_recovery_is_fps_invariant():
+    """18. Tốc độ khung hình (5 FPS vs 10 FPS vs 20 FPS) không làm tăng điểm nhanh hơn: đều +0,5 sau 30s."""
+    scores = {}
+    for fps in (5, 10, 20):
+        dt = 1.0 / fps
+        cfg = PipelineConfig(focus=FocusConfig(initial_score=80.0))
+        rt = SessionRuntime(enrolled=[{"student_id": 1, "display_name": "Test"}], started_at=100.0, config=cfg)
+        rt.process_frame(100.0, {1: Observation(timestamp=100.0, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0)})
+        _feed(rt, 1, 100.0 + dt, 130.0, dt,
+              lambda t: Observation(timestamp=t, visible=True, face_visible=True, ear=0.28, yaw=0.0, pitch=0.0))
+        scores[fps] = rt.states[1].focus_score
+
+    assert scores[5] == pytest.approx(80.5, abs=1e-3)
+    assert scores[10] == pytest.approx(80.5, abs=1e-3)
+    assert scores[20] == pytest.approx(80.5, abs=1e-3)
+
 

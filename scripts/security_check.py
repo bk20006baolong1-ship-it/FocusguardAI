@@ -20,6 +20,7 @@ FORBIDDEN_PATHS = [
     "*-adminsdk-*.json", "*.db", "*.db-wal", "*.db-shm", "*.sqlite", "*.sqlite3",
     "firebase-export-*", "firebase-export-*/*", "data/*", "static/uploads/*", "faces/*",
     "*.mp4", "*.avi", "*.mov", "*.mkv", "recordings/*", "evaluation/private/*", "evaluation/datasets/*",
+    "instance/*", "*.fgev", "evaluation/reports/*", ".focusguard/*",
 ]
 ALLOWED_PATHS = {".env.example"}
 
@@ -32,6 +33,12 @@ CONTENT_RULES = [
     (re.compile(r"focusguard_ai_secret_key"), "hard-coded Flask secret", ("focusguard/security.py",)),
     (re.compile(r"allow\s+read\s*,\s*write\s*:\s*if\s+true"), "Firestore allow-all rule", ()),
     (re.compile(r"cors_allowed_origins\s*=\s*[\"']\*[\"']"), "wildcard CORS", ()),
+    # Camera settings: no credential-bearing camera URL and no real credential key in the tree.
+    (re.compile(r"\brtsps?://[^/\s:@'\"<>]+:[^/\s@'\"<>]+@"), "camera URL with credentials",
+     ("focusguard/cameras/testing.py", "focusguard/cameras/redact.py", "focusguard/privacy/artifact_scan.py",
+      "tests/test_cameras.py",
+      "tests/test_camera_security.py")),
+    (re.compile(r"FG_CAMERA_CREDENTIAL_KEY\s*=\s*[A-Za-z0-9_\-]{40,}={0,2}"), "camera credential key", ()),
 ]
 TEXT_EXT = {".py", ".js", ".html", ".json", ".rules", ".md", ".txt", ".yml", ".yaml", ".sh", ".bat", ".cfg",
             ".toml", ".ini", ".example", ""}
@@ -46,13 +53,24 @@ PRODUCTION_MODULES = ["app.py", "session_manager.py", "repository.py", "camera_a
                       "static/js/core.js", "static/js/teacher.js", "static/js/student.js", "static/js/admin.js",
                       "templates/base.html", "templates/login.html", "templates/error.html",
                       "templates/teacher.html", "templates/student.html", "templates/parent.html",
-                      "templates/admin.html"]
+                      "templates/admin.html", "focusguard/review.py", "focusguard/web_routes.py",
+                      "focusguard/privacy/consent.py", "focusguard/privacy/evidence.py", "focusguard/privacy/audit.py",
+                      "focusguard/privacy/retention.py", "focusguard/privacy/export.py", "focusguard/repo_extensions.py",
+                      "focusguard/policies/interpretation.py", "static/js/feedback.js", "static/js/privacy.js",
+                      "static/js/parent.js", "focusguard/camera_routes.py", "focusguard/cameras/service.py",
+                      "focusguard/cameras/sources.py", "focusguard/cameras/reader.py", "focusguard/cameras/connect.py",
+                      "focusguard/cameras/discovery.py", "focusguard/cameras/netguard.py", "focusguard/cameras/crypto.py",
+                      "focusguard/cameras/rtsp.py", "focusguard/cameras/onvif.py", "focusguard/cameras/redact.py",
+                      "focusguard/cameras/health.py", "focusguard/cameras/check.py", "static/js/cameras.js",
+                      "templates/cameras.html", "focusguard/identity_routes.py", "focusguard/classroom_identity.py",
+                      "focusguard/face_profiles.py", "static/js/classroom_identity.js"]
 FAKE_DATA_RULES = [
     (re.compile(r"^\s*import random\b|^\s*from random import", re.M), "random module in production runtime"),
     (re.compile(r"Math\.random\("), "Math.random in production UI"),
     (re.compile(r"mock_students"), "mock student store"),
     (re.compile(r"emotion_confidence"), "fabricated emotion confidence"),
     (re.compile(r"predicted_(score|drowsy_risk|phone_risk)"), "fabricated prediction numbers"),
+    (re.compile(r"(print|log\w*|logger\.\w+)\([^)\n]*\bembedding\b(?!_)", re.I), "face embedding written to a log"),
 ]
 
 

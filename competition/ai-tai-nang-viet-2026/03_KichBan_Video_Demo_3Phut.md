@@ -14,7 +14,7 @@
 | 1:40–2:00 | Ra khỏi khung hình vài giây, rồi hơn 10 giây | “Khuất vài giây là Tạm khuất, không trừ điểm; từ 10 giây mới là Rời chỗ.” |
 | 2:00–2:18 | Ngắt camera thật nếu an toàn; khung camera báo “Mất tín hiệu camera” hoặc “Không dùng được camera” | “Mất camera thì điểm giữ nguyên; khi camera quay lại, buổi học tiếp tục.” |
 | 2:18–2:42 | Kết thúc buổi học → hộp xác nhận → bảng Tổng kết buổi học → Lịch sử buổi học | “Kết thúc buổi học, hệ thống lưu sự kiện và bảng tổng kết từ dữ liệu đã ghi nhận.” |
-| 2:42–3:00 | Trang Phân tích / thông điệp cuối | “Khi chưa đủ dữ liệu, FocusGuard ghi ‘Chưa có’ chứ không điền số. Hệ thống không nhận diện cảm xúc, không ghi video và chỉ hỗ trợ giáo viên.” |
+| 2:42–3:00 | Trang Phân tích / thông điệp cuối | “Khi chưa đủ dữ liệu, FocusGuard ghi ‘Chưa có’ chứ không điền số. Hệ thống không nhận diện cảm xúc, mặc định không lưu video và chỉ hỗ trợ giáo viên.” |
 
 ## Checklist trước khi quay
 - Đăng ký khuôn mặt người demo trước; chỉ dùng người có đồng ý.

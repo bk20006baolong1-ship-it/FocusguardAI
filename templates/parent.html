@@ -16,7 +16,7 @@
 <div class="fg-stack" id="parentPage">
   <div class="fg-page-header mb-0">
     <div>
-      <h2 class="fg-page-title">Kết quả học tập của {{ student_name }}</h2>
+      <h2 class="fg-page-title">Tình hình trên lớp của {{ student_name }}</h2>
       <p class="fg-page-sub">Số liệu lấy từ các phiên học đã được ghi nhận. Đây là thông tin tham khảo để đồng hành cùng con.</p>
     </div>
   </div>
@@ -189,11 +189,37 @@
     </div>
   </section>
 
+  <section class="fg-card" aria-labelledby="parentPrivacyTitle" id="parentPrivacy" data-student="{{ student_id }}">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="parentPrivacyTitle">Quyền riêng tư của con</h2>
+        <p class="fg-caption mb-0">Phiên bản chính sách {{ policy.policy_version }}</p>
+      </div>
+      {% set tone = {'ACTIVE': 'success', 'EXPIRED': 'warning', 'REVOKED': 'danger'}.get(consent.state, 'neutral') %}
+      <span class="fg-badge" data-tone="{{ tone }}" id="parentConsentBadge"><i class="fa-solid fa-file-signature" aria-hidden="true"></i>Đồng ý: {{ consent.state_label }}</span>
+    </div>
+    <div class="fg-card-body fg-stack" style="gap: var(--fg-3);">
+      <ul class="mb-0">
+        {% for sc in policy.consent_scopes %}
+        <li>{{ sc.label }}: <strong>{{ 'Đã đồng ý' if consent.scopes.get(sc.key[6:]) else 'Chưa đồng ý' }}</strong></li>
+        {% endfor %}
+      </ul>
+      <p class="mb-0">{{ policy.access }}</p>
+      <p class="mb-0">{{ policy.rights }}</p>
+      <p class="mb-0 fg-caption">{% for r in policy.retention %}{{ r.label }}: {{ r.value }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+      {% if consent.state == 'ACTIVE' %}
+      <div><button type="button" class="btn btn-outline-danger" id="parentRevoke"><i class="fa-solid fa-ban" aria-hidden="true"></i>Thu hồi đồng ý</button></div>
+      {% else %}
+      <p class="fg-helper mb-0">Để đồng ý hoặc thay đổi phạm vi, phụ huynh liên hệ nhà trường (bản đồng ý có chữ ký).</p>
+      {% endif %}
+    </div>
+  </section>
+
   <div class="fg-banner" data-tone="info">
     <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
     <div>
       <div class="fg-banner-title">Về dữ liệu trên trang này</div>
-      <div>Hệ thống chỉ ghi nhận hành vi nhìn thấy được qua camera (dùng điện thoại, buồn ngủ, quay đi, rời chỗ). Không ghi hình, không lưu ảnh. Điểm tập trung là chỉ số tham khảo, không phải đánh giá năng lực của con.</div>
+      <div>Hệ thống chỉ ghi nhận hành vi nhìn thấy được qua camera (dùng điện thoại, buồn ngủ, quay đi, rời chỗ). {{ privacy_notice }} Điểm tập trung là chỉ số tham khảo, không phải đánh giá năng lực của con.</div>
     </div>
   </div>
 </div>
@@ -205,6 +231,7 @@
 <script type="application/json" id="fgBoot">{{ {'comparison': comparison}|tojson }}</script>
 <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/chart.js') }}"></script>
+<script src="{{ url_for('static', filename='js/parent.js') }}"></script>
 <script>
 (function () {
   "use strict";

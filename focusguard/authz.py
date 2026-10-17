@@ -99,3 +99,94 @@ def can_view_video_feed(p: Optional[Principal], mode: str, class_id=None) -> boo
     if mode == "classroom":
         return can_manage_class(p, class_id)
     return p.role == ROLE_STUDENT
+
+
+# --------------------------------------------------------------------------
+# BTC feedback: teacher review, evidence, consent, export, evaluation.
+# Each rule is explicit; "logged in" or "admin" is never assumed to imply it.
+# --------------------------------------------------------------------------
+def can_review_class_events(p: Optional[Principal], class_id) -> bool:
+    """Confirm / mark false positive / uncertain: teachers of that class only."""
+    cid = _to_int(class_id)
+    return p is not None and cid is not None and p.role == ROLE_TEACHER and cid in p.class_ids
+
+
+def can_view_evidence(p: Optional[Principal], clip: Optional[dict]) -> bool:
+    """Evidence clips: teachers of the clip's class only. Parents, students and
+    other teachers never; admins manage deletion but do not watch clips."""
+    return bool(clip) and can_review_class_events(p, clip.get("class_id"))
+
+
+def can_delete_evidence(p: Optional[Principal], clip: Optional[dict]) -> bool:
+    return bool(clip) and p is not None and (p.is_admin or can_view_evidence(p, clip))
+
+
+def can_manage_privacy(p: Optional[Principal]) -> bool:
+    """Record consent, delete biometric data, run retention, read the audit log."""
+    return p is not None and p.is_admin
+
+
+def can_revoke_consent(p: Optional[Principal], student_id) -> bool:
+    """The school (admin) or the linked guardian may revoke."""
+    sid = _to_int(student_id)
+    if p is None or sid is None:
+        return False
+    return p.is_admin or (p.role == ROLE_PARENT and p.linked_student_id == sid)
+
+
+def can_export_student(p: Optional[Principal], student_id, student_class_id=None) -> bool:
+    """Admin, the student's teachers and the linked guardian (students: no)."""
+    if p is None or p.role == ROLE_STUDENT:
+        return False
+    return can_view_student(p, student_id, student_class_id)
+
+
+def can_run_evaluation(p: Optional[Principal], class_id) -> bool:
+    return can_review_class_events(p, class_id)
+
+
+# --------------------------------------------------------------------------
+# Account camera settings. Teachers own personal cameras; school (shared)
+# cameras belong to the admin scope and are assigned to classes. Students and
+# parents never see camera settings, credentials or camera IP addresses.
+# --------------------------------------------------------------------------
+def can_manage_cameras(p: Optional[Principal]) -> bool:
+    return p is not None and p.role in (ROLE_TEACHER, ROLE_ADMIN)
+
+
+def can_edit_camera(p: Optional[Principal], cam: Optional[dict]) -> bool:
+    """Rename, credentials, delete, default: the owning teacher (personal camera) or an admin (school camera)."""
+    if not cam or not can_manage_cameras(p):
+        return False
+    if cam.get("is_shared"):
+        return p.is_admin
+    return p.role == ROLE_TEACHER and _to_int(cam.get("owner_user_id")) == p.user_id
+
+
+def can_view_camera(p: Optional[Principal], cam: Optional[dict], assigned_class_ids=()) -> bool:
+    """See (not edit) a camera: its editors, and teachers of a class the school camera is assigned to."""
+    if can_edit_camera(p, cam):
+        return True
+    return bool(cam) and p is not None and p.role == ROLE_TEACHER and bool(cam.get("is_shared")) and \
+        any(_to_int(c) in p.class_ids for c in assigned_class_ids)
+
+
+def can_use_camera(p: Optional[Principal], cam: Optional[dict], class_id=None, assigned_class_ids=()) -> bool:
+    """Open the camera (preview, class session): personal camera of the teacher, or a school
+    camera assigned to the class being taught (admins: any school camera)."""
+    if not cam or not can_manage_cameras(p):
+        return False
+    if not cam.get("is_shared"):
+        return p.role == ROLE_TEACHER and _to_int(cam.get("owner_user_id")) == p.user_id
+    if p.is_admin:
+        return True
+    cid = _to_int(class_id)
+    assigned = {_to_int(c) for c in assigned_class_ids}
+    if cid is None:
+        return bool(assigned & set(p.class_ids))
+    return cid in assigned and can_manage_class(p, cid)
+
+
+def can_assign_camera(p: Optional[Principal], cam: Optional[dict]) -> bool:
+    """Only admins assign school cameras to classes."""
+    return bool(cam) and p is not None and p.is_admin and bool(cam.get("is_shared"))

@@ -8,10 +8,11 @@
 | Tên đội | iKH Future Makers |
 | Thành viên | Nguyễn Hoàng Bảo Long |
 | Trường/Lớp | Lớp 8/1 - THCS Tây Nha Trang, Khánh Hòa |
-| Giáo viên hướng dẫn | Chưa cung cấp |
+| Giáo viên hướng dẫn | Phan Tuấn Kiệt, Giám Đốc, Trung tâm tin học iKH |
 | Bảng thi | Bảng A – Học sinh THCS |
 | Sản phẩm | FocusGuard – Hệ thống hỗ trợ giáo viên nhận biết tín hiệu mất tập trung bằng camera |
-| Phiên bản mô tả | Nhánh chính `main` tại commit `950f8f5` (đã gồm giao diện mới; mã ứng dụng giống hệt commit `a9a0406` dùng để kiểm thử và chụp ảnh) |
+| Phiên bản mô tả | Repo `DKTECHVN/focusAI`, nhánh `main` (mã kiểm chứng ghi trong trường `git_sha` của mỗi báo cáo đánh giá) |
+| Trạng thái | `CODE_COMPLETE_CLOUD_VERIFIED_REAL_CLASSROOM_EVIDENCE_PENDING` — mã và công cụ đã hoàn thành, kiểm chứng trên máy chủ đám mây; độ chính xác trên lớp học thật chưa đo |
 
 # 1. Vấn đề thực tế
 
@@ -21,7 +22,7 @@ Trong một lớp học, giáo viên phải vừa giảng bài, vừa quan sát 
 - Ghi nhận các tín hiệu quan sát được bằng camera theo thời gian, bỏ qua những khoảnh khắc rất ngắn.
 - Hiển thị trạng thái và lịch sử cho đúng người dùng: giáo viên, học sinh, phụ huynh, quản trị viên.
 - Tính điểm tập trung bằng quy tắc công khai, không gọi đó là mô hình AI dự đoán.
-- Bảo vệ dữ liệu: không ghi video; không nhận diện cảm xúc; không đo hướng nhìn; không tự động dùng kết quả để kỷ luật hay chấm hạnh kiểm.
+- Bảo vệ dữ liệu: mặc định không lưu video (chế độ minh chứng là tùy chọn, có đồng ý, tự xóa); nhận diện khuôn mặt chỉ khi phụ huynh đồng ý; không nhận diện cảm xúc; không đo hướng nhìn; không tự động dùng kết quả để kỷ luật hay chấm hạnh kiểm.
 
 ## Giá trị nổi bật
 | Khía cạnh | FocusGuard |
@@ -147,14 +148,32 @@ Công nghệ: Python + Flask + Flask-SocketIO; lưu trữ SQLite hoặc Firestor
 
 | Hạng mục | Kết quả | Ghi chú |
 |---|---|---|
-| Kiểm thử tự động (`bash scripts/ci_check.sh`) | 184 đạt, 0 lỗi, 9 bỏ qua | Chạy lại ngày 04/10/2026 tại `a9a0406` (cùng mã với `main` `950f8f5`); 9 bài bỏ qua vì cần camera (3) hoặc Firestore emulator (6) |
-| Firestore emulator | 6/6 đạt | Chạy lại ngày 04/10/2026 |
-| Kiểm thử phần cứng | 3/3 đạt | Chạy lại ngày 04/10/2026: camera trả khung hình, nạp được YOLOv8 + MediaPipe, nạp được InsightFace |
+| Kiểm thử tự động (`bash scripts/ci_check.sh`) | 675 đạt, 0 lỗi, 27 bỏ qua có lý do | Chạy trực tiếp trên máy chủ đám mây, clone mới, Python 3.12; bỏ qua vì cần Firestore emulator (24) hoặc camera (3) |
+| Firestore emulator | 24/24 PASS | Cùng bộ hợp đồng lưu trữ với SQLite, project `demo-focusguard` |
+| Đi thử giao diện bằng trình duyệt | 222/222 kiểm tra đạt | Playwright, máy tính 1366 px và điện thoại 390 px |
+| Chạy thử quy trình đánh giá lớp học | Đủ 9 bước, 15/15 kịch bản | `python tools/field_test.py --simulate` — dữ liệu SYNTHETIC, không phải kết quả thật |
+| Kiểm thử phần cứng | 3/3 đạt | Ngày 04/10/2026 trên MacBook Air M3: camera trả khung hình, nạp được YOLOv8 + MediaPipe, nạp được InsightFace |
 | Camera thật | MacBook Air M3, camera FaceTime HD, khoảng 7,5 khung hình/giây trên CPU | `docs/REAL_CAMERA_RESULTS.md` |
 | Kịch bản camera thật | 1–5, 8, 9 đạt; 6–7 cần thêm người thử | Một người, một máy, một buổi |
 | Độ chính xác trong lớp học thật | **NOT_EVALUATED** | Chưa có bộ dữ liệu gán nhãn, có sự đồng ý |
 
-184 bài kiểm thử chứng minh mã nguồn chạy đúng thiết kế; chúng **không** phải là con số về độ chính xác của AI.
+Các bài kiểm thử chứng minh mã nguồn chạy đúng thiết kế; chúng **không** phải là con số về độ chính xác của AI
+(trước đợt góp ý: 184 bài; sau đợt góp ý, trước khi chuyển repo: 334 bài).
+
+**Cải tiến theo góp ý của Ban Tổ chức (đã có trên `main`).** Bảng đối chiếu đầy đủ từng góp ý với mã, test và bằng
+chứng: `docs/BTC_FEEDBACK_CLOSURE.md`. Các con số dưới đây đều từ **dữ liệu sinh tự động (SYNTHETIC/REPLAY)**, chỉ dùng
+để kiểm tra logic, không phải độ chính xác thực tế:
+
+| Hạng mục (theo góp ý) | Đã làm | Trạng thái |
+|---|---|---|
+| Lớp học trực tiếp, nhiều học sinh | Chế độ *Đánh giá thực tế*, 15 kịch bản theo góp ý, công cụ thực địa một lệnh (`tools/field_test.py`) và tổng hợp báo cáo (`scripts/finalize_real_classroom_evaluation.py`) | Công cụ đã có và đã chạy thử mô phỏng; lớp thật **chưa chạy** (cần camera, học sinh và đồng ý) |
+| Nhiều người: cắt nhau, người lạ, che mặt, đổi góc, lớp đông | 10 kịch bản tổng hợp, đo tải 5/10/20 học sinh | 10/10 đạt trên dữ liệu tổng hợp; camera thật **chưa chạy** |
+| Cảnh báo sai, hiệu chỉnh | Giáo viên chọn hoạt động lớp; chính sách theo hoạt động; chỉ số P/R/F1, cảnh báo sai mỗi giờ; công cụ hiệu chỉnh | Ngưỡng hiện là giá trị khởi đầu, **chưa hiệu chỉnh bằng dữ liệu thật** |
+| Giáo viên xem lại | Trang Sự kiện: Xác nhận đúng / Báo nhầm / Không chắc / Ghi chú, lịch sử, "Cần giáo viên xem lại"; thống kê bỏ các sự kiện giáo viên xác nhận báo nhầm | Đã có, có kiểm thử |
+| Đồng ý, quyền riêng tư | Đồng ý của phụ huynh theo phạm vi, thu hồi, xóa, thời hạn lưu, nhật ký, xuất dữ liệu; đoạn minh chứng (tùy chọn) chỉ gồm khung hình đã cắt theo đúng học sinh; báo cáo được quét tự động để không lộ tên, ảnh hay dữ liệu khuôn mặt | Đã có, có kiểm thử |
+
+Đã triển khai framework đánh giá lớp học thật; kết quả accuracy chỉ được cập nhật sau khi hoàn thành evaluation có
+consent và ground truth.
 
 ![Bảng tổng kết sau khi kết thúc buổi học](screenshots/session-summary.png)
 
@@ -173,13 +192,13 @@ Các lần chạy camera thật đã giúp tìm ra lỗi: không ghép được 
 
 ## Dữ liệu sinh trắc
 - Chỉ lưu vector đặc trưng khuôn mặt; ảnh đăng ký chỉ nằm trong bộ nhớ lúc trích xuất, không ghi ra đĩa.
-- Không ghi video, không lưu khung hình camera.
-- Màn hình đăng ký khuôn mặt giải thích dữ liệu nào được lưu và chỉ cho chụp sau khi quản trị viên xác nhận đã có sự đồng ý của học sinh và phụ huynh.
+- Mặc định FocusGuard không lưu video. Evidence Mode là tùy chọn, chỉ lưu đoạn minh chứng ngắn quanh sự kiện khi được phép, giới hạn quyền truy cập và tự động xóa theo retention policy (mặc định tắt; nếu bật: 3 giây trước, 5 giây sau, chỉ giáo viên của lớp xem, tự xóa sau 24 giờ).
+- Đăng ký và nhận diện khuôn mặt chỉ được thực hiện khi máy chủ có bản ghi đồng ý của phụ huynh/người giám hộ còn hiệu lực; phụ huynh có thể thu hồi đồng ý, khi đó nhận diện dừng ngay và dữ liệu khuôn mặt bị xóa. Mọi thao tác nhạy cảm đều được ghi nhật ký.
 - Người chưa đăng ký hoặc nhận dạng chưa chắc chắn không bị gán vào học sinh nào.
 - Quản trị viên xóa được vector đặc trưng bất cứ lúc nào.
 
 ## AI có trách nhiệm
-FocusGuard là tín hiệu hỗ trợ giáo viên, không phải hệ thống tự động kỷ luật, xếp hạng hạnh kiểm hay chẩn đoán học sinh.
+FocusGuard là tín hiệu hỗ trợ giáo viên, không phải hệ thống tự động kỷ luật, xếp hạng hạnh kiểm hay chẩn đoán học sinh. Cúi đầu, quay đầu, nhắm mắt, rời chỗ không phải lúc nào cũng là mất tập trung: giáo viên chọn hoạt động lớp (chép bài, nhìn bảng, thảo luận nhóm…) để hệ thống hiểu đúng tín hiệu, và giáo viên xem lại, xác nhận hoặc báo nhầm từng sự kiện. Giáo viên là người quyết định cuối cùng.
 
 ## Phần kế thừa và phần của dự án
 YOLOv8, ByteTrack, MediaPipe, InsightFace là công nghệ có sẵn; đội không huấn luyện hay tự xây các mô hình này. Phần riêng của dự án gồm ghép người với khuôn mặt, IdentityManager, BehaviorAnalyzer, FocusEngine, SessionRuntime, cập nhật trực tiếp do máy chủ quyết định, phân quyền, thống kê, bài kiểm thử và các lần sửa lỗi sau khi chạy camera thật.
@@ -189,17 +208,19 @@ YOLOv8, ByteTrack, MediaPipe, InsightFace là công nghệ có sẵn; đội kh�
 ## Điểm chưa hoàn thiện
 - Chưa có đánh giá độ chính xác trên bộ dữ liệu lớp học thật có gán nhãn và có sự đồng ý.
 - Phát hiện điện thoại bằng YOLOv8n trên webcam laptop còn đứt đoạn: trong buổi chạy chụp ảnh hồ sơ, việc cầm điện thoại bị ghi thành nhiều lần ngắn, mỗi lần vài giây (6 lần, tổng 22,3 giây), và lúc cúi nhìn điện thoại thường được ghi là "Quay đi chỗ khác".
-- Kịch bản hai người đi cắt nhau và người lạ chưa chạy với camera thật vì cần thêm người thử.
+- Kịch bản hai người đi cắt nhau và người lạ chưa chạy với camera thật vì cần thêm người thử (đã có kiểm thử trên dữ liệu tổng hợp).
+- Lần thử camera thật mới là một người trước webcam laptop, giống học trực tuyến hơn lớp học trực tiếp; chưa thử camera đặt trong lớp với nhiều học sinh.
+- Ngưỡng thời gian và hệ số phạt theo hoạt động là giá trị khởi đầu, chưa hiệu chỉnh bằng dữ liệu lớp thật. Trên dữ liệu replay, chính sách theo hoạt động giảm mạnh cảnh báo sai "quay đi" nhưng cũng làm sót một số trường hợp quay đi thật, nên cần hiệu chỉnh.
 - Camera chỉ phân tích khi trang Giám sát (giáo viên) hoặc trang Phiên học (học sinh) đang mở.
 - Firestore trên cloud chưa kiểm thử; mới kiểm thử trên emulator.
-- Lịch sử git cũ từng chứa tài sản nhạy cảm; mã hiện tại đã qua kiểm tra bảo mật nhưng lịch sử cần xử lý nếu công bố lâu dài.
+- Repo cũ (trước khi chuyển sang `DKTECHVN/focusAI`) còn tài sản nhạy cảm trong lịch sử; repo mới bắt đầu từ bản sạch và mã hiện tại đã qua kiểm tra bảo mật.
 
 # 8. Tác động, hướng phát triển & cam kết
 
 FocusGuard hướng tới giảm tải việc quan sát cho giáo viên, phát hiện sớm tín hiệu cần chú ý và tạo dữ liệu để trao đổi với học sinh, phụ huynh. Giá trị chính là hỗ trợ phản hồi kịp thời, không thay thế quan hệ thầy–trò.
 
 ## Ưu tiên tiếp theo
-1. Tổ chức một đợt đánh giá nhỏ có sự đồng ý, có người gán nhãn thủ công, để báo cáo tỷ lệ phát hiện đúng và cảnh báo sai.
+1. Tổ chức một đợt đánh giá nhỏ (5–10 tình nguyện viên) có sự đồng ý, camera đặt trong lớp, có người gán nhãn thủ công: chạy `python tools/field_test.py` theo `docs/REAL_CLASSROOM_DAY_CHECKLIST.md`, tổng hợp bằng `scripts/finalize_real_classroom_evaluation.py` để báo cáo tỷ lệ phát hiện đúng và cảnh báo sai, rồi hiệu chỉnh ngưỡng có người duyệt.
 2. Kiểm thử với nhiều người, người lạ, ánh sáng và góc camera khác nhau, và trên máy dùng trong buổi thi.
 3. Cải thiện phát hiện điện thoại (mô hình lớn hơn hoặc camera đặt tốt hơn) và đo lại.
 4. Cho giáo viên dùng thử giao diện và ghi nhận góp ý.
@@ -213,7 +234,8 @@ FocusGuard hướng tới giảm tải việc quan sát cho giáo viên, phát h
 - `docs/PRIVACY_AND_AI_SAFETY.md`
 - `docs/REAL_CAMERA_RESULTS.md`
 - `docs/UI_UX.md`
-- `.github/workflows/ci.yml`, `focusguard/config.py`
+- `docs/BTC_FEEDBACK_CLOSURE.md`, `docs/REAL_CLASSROOM_EVALUATION_PROTOCOL.md`
+- `scripts/ci_check.sh`, `focusguard/config.py`
 - `competition/ai-tai-nang-viet-2026/screenshots/README.md` (nguồn gốc từng ảnh)
 
-> Trước khi nộp: điền thông tin đội đã đăng ký, điền phần kê khai đóng góp của thành viên và đính kèm Prompt Log gốc.
+> Trước khi nộp: đội điền phần kê khai đóng góp của thành viên (mục đánh dấu ĐỘI ĐIỀN) và đính kèm Prompt Log gốc. Thông tin đội đã điền ở đầu hồ sơ.

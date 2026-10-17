@@ -10,6 +10,11 @@ Chỉ lưu ảnh chụp từ **giao diện thật của phiên bản mô tả tr
 
 ## Nguồn gốc 5 ảnh (chụp ngày 04/10/2026)
 
+> **Lưu ý (15/10/2026):** các commit nêu dưới đây thuộc repo cũ, không có trong `DKTECHVN/focusAI`. Ảnh chụp **trước**
+> đợt cải tiến theo góp ý BTC. Ảnh `analytics-empty-or-real.png` có danh sách "Điểm trung bình hôm nay" **đánh số thứ
+> tự**; giao diện hiện tại đã bỏ số thứ tự và xếp theo tên (không xếp hạng học sinh) — không dùng ảnh này làm minh hoạ
+> cho giao diện hiện tại; chụp lại nếu cần.
+
 Điểm chung:
 - Nhánh `feat/competition-ui-ux-hardening`, commit `a9a0406b69f734141fc8fe72059963f152f6d019`. PR #3 đã merge commit này vào `main` (`950f8f5`); hai commit có cùng mã nguồn (tree `6d16bc8`).
 - Ứng dụng chạy bằng `python app.py` với cơ sở dữ liệu SQLite mới tạo (chỉ có tài khoản mẫu của môi trường phát triển), không dùng công cụ bơm dữ liệu.

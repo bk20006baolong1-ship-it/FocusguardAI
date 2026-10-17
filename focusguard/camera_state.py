@@ -11,6 +11,7 @@ actually known:
                    has not arrived yet
     ACTIVE         frames are being analysed
     NO_SIGNAL      frames stopped arriving (stalled / disconnected stream)
+    RECONNECTING   the stream was lost and the reader is reconnecting (bounded backoff)
     UNAVAILABLE    the camera could not be opened or read (busy, unplugged,
                    permission denied) or the pipeline failed to start
 """
@@ -20,6 +21,7 @@ NOT_STREAMING = "NOT_STREAMING"
 STARTING = "STARTING"
 ACTIVE = "ACTIVE"
 NO_SIGNAL = "NO_SIGNAL"
+RECONNECTING = "RECONNECTING"
 UNAVAILABLE = "UNAVAILABLE"
 
 LABELS_VI = {
@@ -28,6 +30,7 @@ LABELS_VI = {
     STARTING: "Đang khởi động camera",
     ACTIVE: "Camera đang hoạt động",
     NO_SIGNAL: "Mất tín hiệu camera",
+    RECONNECTING: "Camera mất kết nối — đang kết nối lại…",
     UNAVAILABLE: "Không dùng được camera",
 }
 
@@ -35,8 +38,9 @@ HELP_VI = {
     OFF: "Bắt đầu buổi học để bật camera.",
     NOT_STREAMING: "Mở trang Giám sát để camera bắt đầu phân tích.",
     STARTING: "Đang tải mô hình nhận diện, thường mất vài giây.",
-    ACTIVE: "Hình ảnh được phân tích trực tiếp, không ghi hình.",
+    ACTIVE: "Hình ảnh được phân tích trực tiếp.",
     NO_SIGNAL: "Không nhận được hình ảnh mới. Điểm tập trung tạm dừng, không bị trừ. Hãy kiểm tra camera hoặc tải lại trang.",
+    RECONNECTING: "Đang tự động kết nối lại camera. Điểm tập trung tạm dừng, không ai bị tính là rời chỗ.",
     UNAVAILABLE: "Kiểm tra camera đã cắm, không bị ứng dụng khác chiếm và đã được cấp quyền, rồi thử lại.",
 }
 
@@ -55,10 +59,10 @@ def derive(session_active: bool, hub: dict, runtime_camera_status: str) -> str:
     if not hub.get("streaming"):
         # Frames only flow while a camera view is open.
         return NOT_STREAMING
+    if hub.get("reconnecting"):
+        return RECONNECTING
     if hub.get("device_ok") is False:
         return UNAVAILABLE
-    if hub.get("device_ok") is None:
-        return STARTING
     if runtime_camera_status == "NO_SIGNAL":
         return NO_SIGNAL
     if runtime_camera_status == "ACTIVE":

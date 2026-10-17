@@ -237,17 +237,19 @@ def watchlist(rows: Iterable[dict], names: dict, threshold: float = 70.0, min_me
         if avg < threshold:
             out.append({"id": sid, "display_name": names.get(sid, f"#{sid}"), "score": avg,
                         "measured_sessions": agg["measured_sessions"]})
-    return sorted(out, key=lambda r: r["score"])
+    return sorted(out, key=lambda r: (r["display_name"] or "").lower())     # name order, not a ranking
 
 
 def leaderboard(rows: Iterable[dict], names: dict) -> List[dict]:
+    """Today's average heuristic score per student, in NAME order. FocusGuard
+    never ranks students (no positions, no best/worst ordering)."""
     out = []
     for sid, agg in student_averages(rows).items():
         if agg["average_focus_score"] is None:
             continue
         out.append({"student_id": sid, "display_name": names.get(sid, f"#{sid}"),
                     "score": agg["average_focus_score"]})
-    return sorted(out, key=lambda r: -r["score"])
+    return sorted(out, key=lambda r: (r["display_name"] or "").lower())
 
 
 def attendance_history(class_sessions: Iterable[dict], rows_for_student: Iterable[dict]) -> List[dict]:

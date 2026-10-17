@@ -1,0 +1,175 @@
+name: Competition evaluation (cloud)
+
+# Cloud-first verification of the BTC feedback work. No webcam, no student
+# data: every number comes from SYNTHETIC / REPLAY data generated in code, and
+# the uploaded artifacts never contain images, embeddings or evidence clips.
+# Real camera and real classroom steps stay HARDWARE_REQUIRED /
+# HUMAN_GROUND_TRUTH_REQUIRED (docs/REAL_CLASSROOM_EVALUATION_PROTOCOL.md).
+on:
+  workflow_dispatch:
+    inputs:
+      heavy_benchmark:
+        description: "Heavy benchmark (5/10/20/40 synthetic students x 60 s)"
+        type: boolean
+        default: false
+      calibration_grid:
+        description: "Calibration grid on the replay fixture"
+        type: choice
+        options: [quick, full]
+        default: quick
+  pull_request:
+  push:
+    branches: ["feat/**"]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON: python
+  DATABASE_TYPE: sqlite
+  FOCUSGUARD_ENV: development
+
+jobs:
+  unit-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - run: python -m pip install -r requirements-ci.txt
+      - name: Context policy, teacher review, consent, evidence, retention, security, repository contract, UI
+        run: >
+          python -m pytest -q -rs
+          tests/test_context_policy.py tests/test_teacher_review.py tests/test_consent_privacy.py
+          tests/test_evidence.py tests/test_security_btc.py tests/test_repo_contract.py tests/test_ui_contract.py
+          tests/test_session_runtime.py tests/test_focus_engine.py tests/test_behavior.py tests/test_identity.py
+
+  synthetic-multiperson:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - run: python -m pip install -r requirements-ci.txt
+      - name: Identity crossing, track change, stranger, occlusion, camera angle, 5/10/20 students (SYNTHETIC)
+        run: python -m pytest -q -rs tests/test_multiperson_stress.py
+      - name: Stress report
+        run: |
+          mkdir -p out
+          python - <<'EOF'
+          import json
+          from focusguard.evaluation.stress import run_all
+          r = run_all()
+          json.dump({k: v for k, v in r.items()}, open("out/stress.json", "w"), indent=2, default=str)
+          for s in r["scenarios"]:
+              print(s["scenario"], s["name"], "PASS" if s["passed"] else "FAIL")
+          assert r["passed"]
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-multiperson
+          path: out/stress.json
+
+  evaluation-metrics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - run: python -m pip install -r requirements-ci.txt
+      - name: Metrics engine tests (known fixture, NOT_ENOUGH_DATA, calibration)
+        run: python -m pytest -q -rs tests/test_real_classroom_evaluation.py tests/test_tools_and_benchmark.py
+      - name: Replay ground truth metrics + stress + benchmark smoke + calibration
+        run: >
+          python scripts/run_competition_evaluation.py --output-dir evaluation/reports/ci
+          --grid ${{ github.event.inputs.calibration_grid || 'quick' }}
+          ${{ github.event.inputs.heavy_benchmark == 'true' && '--heavy' || '' }}
+      - name: Show summary
+        run: cat evaluation/reports/ci/evaluation-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Artifacts contain no private data
+        run: |
+          python - <<'EOF'
+          import json, os, re
+          d = "evaluation/reports/ci"
+          for name in os.listdir(d):
+              text = open(os.path.join(d, name), encoding="utf-8").read()
+              assert "data:image" not in text and "embedding\"" not in text, name
+              assert not re.search(r"\.(jpg|jpeg|png|fgev|mp4)\b", text), name
+          print("artifact privacy check: PASS", sorted(os.listdir(d)))
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: competition-evaluation
+          path: |
+            evaluation/reports/ci/evaluation-report.json
+            evaluation/reports/ci/evaluation-summary.md
+            evaluation/reports/ci/benchmark.json
+            evaluation/reports/ci/calibration.json
+            evaluation/reports/ci/calibration.md
+
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - run: python -m pip install -r requirements-ci.txt
+      - name: Classroom benchmark (runtime only; detectors are HARDWARE_REQUIRED)
+        run: >
+          python scripts/benchmark_classroom.py --output out/benchmark.json
+          ${{ github.event.inputs.heavy_benchmark == 'true' && '--heavy' || '' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark
+          path: out/benchmark.json
+
+  firestore-emulator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-firestore-ci.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: |
+          python -m pip install -r requirements-firestore-ci.txt
+          npm ci --no-audit --no-fund
+      - name: Firestore emulator contract (same contract as SQLite)
+        run: bash scripts/firestore_emulator_check.sh
+
+  hardware-camera:
+    # Cloud runners have no webcam: this job documents the SKIP explicitly
+    # instead of pretending the camera path was verified.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Real camera evaluation tool
+        run: |
+          python tools/run_classroom_evaluation.py check | tee hw.txt
+          grep -q "HARDWARE_REQUIRED" hw.txt
+          echo "### Hardware camera: SKIPPED (HARDWARE_REQUIRED)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Real camera angle, crowded classroom, lighting, crossing and actual accuracy are NOT verified in cloud." >> "$GITHUB_STEP_SUMMARY"

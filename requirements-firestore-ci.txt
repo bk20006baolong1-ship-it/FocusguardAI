@@ -1,0 +1,4 @@
+# CI dependencies for the Firestore EMULATOR contract job (no production access).
+-r requirements-ci.txt
+google-cloud-firestore==2.27.0
+google-auth==2.55.0

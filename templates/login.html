@@ -22,7 +22,7 @@
     <p>FocusGuard quan sát hành vi nhìn thấy được qua camera và tóm tắt lại để giáo viên hỗ trợ học sinh đúng lúc.</p>
     <ul class="fg-auth-points">
       <li><i class="fa-solid fa-circle-check" aria-hidden="true"></i><span>Chỉ ghi nhận hành vi quan sát được: dùng điện thoại, buồn ngủ, quay đi, rời chỗ.</span></li>
-      <li><i class="fa-solid fa-shield-halved" aria-hidden="true"></i><span>Không ghi hình, không lưu ảnh khuôn mặt.</span></li>
+      <li><i class="fa-solid fa-shield-halved" aria-hidden="true"></i><span>{% if evidence_enabled %}Mặc định không lưu video; chế độ minh chứng chỉ lưu đoạn ngắn có đồng ý và tự xóa.{% else %}Không ghi hình, không lưu ảnh khuôn mặt.{% endif %}</span></li>
       <li><i class="fa-solid fa-user-check" aria-hidden="true"></i><span>Kết quả là gợi ý tham khảo, giáo viên là người quyết định.</span></li>
     </ul>
   </section>

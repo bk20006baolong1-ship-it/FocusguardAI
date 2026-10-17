@@ -99,6 +99,7 @@
     if (data.class_session_active) S.mode = data.mode;
     if (wasActive && !data.class_session_active) S.extraLogs = [];
     render();
+    document.dispatchEvent(new CustomEvent("fg:snapshot", { detail: data }));   // feedback.js (context selector)
   }
 
   function mergedLogs() {
@@ -195,6 +196,7 @@
         dashboard.camera();
       });
       $("startBtn").addEventListener("click", dashboard.start);
+      FG.loadClassCamera($("classCameraSelect"), $("classCameraHelp"), S.classId);
       $("stopBtn").addEventListener("click", dashboard.stop);
       $("studentFilter").addEventListener("click", (e) => {
         const b = e.target.closest("[data-filter]");
@@ -203,20 +205,9 @@
         dashboard.students();
       });
       $("studentGrid").addEventListener("click", openPanelFromEvent);
+      $("attentionList").addEventListener("click", openPanelFromEvent);
       const feed = $("cameraFeed");
-      feed.addEventListener("load", () => {
-        S.camera.error = false;
-        if (S.data && S.data.camera && S.data.camera.state === "ACTIVE") {
-          feed.hidden = false;
-          $("cameraState").hidden = true;
-        }
-      });
-      feed.addEventListener("error", () => {
-        if (S.data && S.data.class_session_active && S.camera.src) {
-          S.camera.error = true;
-          dashboard.camera();
-        }
-      });
+      feed.addEventListener("error", () => { if (S.camera.src) { S.camera.error = true; dashboard.camera(); } });
       $("cameraState").addEventListener("click", (e) => { if (e.target.closest("[data-camera-retry]")) dashboard.cameraRestart(); });
       FG.skeleton($("attentionList"), 2);
       FG.skeleton($("studentGrid"), 3);
@@ -266,6 +257,7 @@
       const timer = $("sessionTimer");
       timer.hidden = !active;
       if (active) timer.textContent = FG.clock(elapsed());
+      $("classCameraRow").hidden = active || S.mode !== "classroom";
       const startBtn = $("startBtn"), stopBtn = $("stopBtn");
       startBtn.hidden = active; stopBtn.hidden = !active;
       if (!FG.isBusy(startBtn)) startBtn.disabled = !enrolled;
@@ -444,19 +436,24 @@
       if (!S.camera.src && !S.camera.error) { dashboard.cameraRestart(); return; }
       const cam = d.camera || { state: "STARTING", label: "Đang khởi động camera", help: "" };
       const waited = (performance.now() - S.camera.startedAt) / 1000;
-      if (S.camera.error && cam.state !== "ACTIVE") {
+      if (S.camera.error) {
         feed.hidden = true;
         setBadge("danger", "fa-video-slash", "Không có hình ảnh");
         show("fa-video-slash", "Không tải được hình ảnh camera", "Kết nối tới camera bị ngắt. Điểm tập trung tạm dừng, không bị trừ.", "Thử lại");
         return;
       }
+      const src = cam.source || {}, hl = cam.health || {};
+      $("cameraSourceInfo").textContent = [src.camera_name ? "Camera: " + src.camera_name : null,
+        hl.resolution ? String(hl.resolution).replace("x", "×") : null,
+        hl.measured_fps ? Math.round(hl.measured_fps * 10) / 10 + " FPS" : null,
+        hl.reconnect_count ? "kết nối lại " + hl.reconnect_count + " lần" : null].filter(Boolean).join(" · ");
       switch (cam.state) {
+        case "RECONNECTING":
+          feed.hidden = true;
+          setBadge("warning", "fa-rotate", "Đang kết nối lại");
+          show("", cam.label, cam.help, null, true);
+          break;
         case "ACTIVE":
-          if (S.camera.error || !S.camera.src || !feed.src) {
-            S.camera.error = false;
-            S.camera.src = true;
-            feed.src = "/video_feed" + classQuery("&mode=classroom&t=" + Date.now());
-          }
           feed.hidden = false; overlay.hidden = true; overlay._sig = null;
           setBadge("success", "fa-video", "Đang hoạt động");
           break;
@@ -504,10 +501,11 @@
       FG.busy(btn, true, "Đang bắt đầu…");
       try {
         const url = S.mode === "classroom" ? "/api/teacher/start_offline_class" : "/api/teacher/start_class";
-        const res = await FG.api(url, { body: { class_id: S.classId } });
+        const body = { class_id: S.classId };
+        if (S.mode === "classroom" && $("classCameraSelect").value) body.camera_id = $("classCameraSelect").value;
+        if (S.mode === "classroom" && $("initFirst") && $("initFirst").checked) body.initialize = true;
+        const res = await FG.api(url, { body });
         FG.toast(res.already_active ? "Buổi học đã được bắt đầu trước đó." : "Đã bắt đầu buổi học.", res.already_active ? "info" : "success");
-        S.camera.error = false;
-        S.camera.src = false;
         await load();
       } catch (e) {
         FG.toast(e.message, "danger");
@@ -615,6 +613,19 @@
     async init() {
       $("attSession").addEventListener("change", (e) => { attendance.selected = e.target.value; attendance.loadSelected(); });
       $("attExport").addEventListener("click", attendance.exportCsv);
+      $("attBody").addEventListener("change", async (e) => {
+        const sel = e.target.closest("[data-att-student]");
+        if (!sel || !sel.value) return;
+        const body = { class_id: S.classId, student_id: Number(sel.dataset.attStudent), status: sel.value };
+        if (attendance.selected !== "live") body.class_session_id = Number(attendance.selected);
+        sel.disabled = true;
+        try {
+          await FG.api("/api/teacher/attendance", { body });
+          FG.toast("Đã sửa điểm danh.", "success");
+          if (attendance.selected !== "live") { attendance.detail = null; await attendance.loadSelected(); } else await load();
+        } catch (err) { FG.toast(err.message, "danger"); }
+        finally { sel.disabled = false; sel.value = ""; }
+      });
       FG.skeleton($("attBody"), 5);
       try {
         const res = await FG.api("/api/teacher/class_sessions" + classQuery());
@@ -654,13 +665,13 @@
       const set = (id, v) => { $(id).textContent = v; };
       let rows = [], sub = "";
       if (attendance.selected === "live" && live) {
-        rows = d.students.map((s) => ({ name: s.name, status: s.attendance_status, checkin: s.checkin_offset_seconds,
-          visible: s.visible_seconds, away_count: s.away_count, away_seconds: s.away_seconds }));
+        rows = d.students.map((s) => ({ student_id: s.student_id, name: s.name, status: s.attendance_status, checkin: s.checkin_offset_seconds,
+          visible: s.visible_seconds, away_count: s.away_count, away_seconds: s.away_seconds, source: s.attendance_source }));
         sub = "Buổi đang diễn ra · cập nhật trực tiếp";
         $("aAbsentLabel").textContent = "Chưa điểm danh";
       } else if (attendance.selected !== "live" && attendance.detail) {
-        rows = attendance.detail.students.map((s) => ({ name: s.name, status: s.attendance_status, checkin: null,
-          visible: null, away_count: s.away_count, away_seconds: s.away_seconds }));
+        rows = attendance.detail.students.map((s) => ({ student_id: s.student_id, name: s.name, status: s.attendance_status, checkin: null,
+          visible: null, away_count: s.away_count, away_seconds: s.away_seconds, source: s.attendance_source }));
         sub = "Buổi học " + FG.dateTime(attendance.detail.started_at) + " · đã kết thúc";
         $("aAbsentLabel").textContent = "Vắng mặt";
       } else if (attendance.selected !== "live") {
@@ -679,17 +690,20 @@
       set("aEnrolled", rows.length);
       set("aPresent", count("PRESENT") + count("LATE"));
       set("aLate", count("LATE"));
-      set("aAbsent", attendance.selected === "live" ? count("NOT_YET") : count("ABSENT"));
+      set("aAbsent", attendance.selected === "live" ? count("NOT_SEEN") : count("ABSENT"));
       $("attSub").textContent = sub;
       $("attExport").disabled = !rows.length;
       const isLive = attendance.selected === "live";
-      const html = '<div class="fg-table-wrap"><table class="fg-table is-stack"><thead><tr><th>Học sinh</th><th>Điểm danh</th>' +
+      const editSel = (r) => '<select class="form-select form-select-sm fg-att-edit" data-att-student="' + r.student_id + '" aria-label="Sửa điểm danh của ' + esc(r.name) + '">' +
+        '<option value="">Sửa…</option><option value="PRESENT">Có mặt</option><option value="LATE">Đi muộn</option><option value="ABSENT">Vắng mặt</option></select>';
+      const html = '<div class="fg-table-wrap"><table class="fg-table is-stack"><thead><tr><th>Học sinh</th><th>Điểm danh</th><th>Giáo viên sửa</th>' +
         (isLive ? "<th>Vào lớp sau</th><th class=\"is-num\">Thời gian trong khung hình</th>" : "") +
         '<th class="is-num">Số lần rời chỗ</th><th class="is-num">Thời gian rời chỗ</th></tr></thead><tbody>' +
         rows.map((r) => {
           const att = FG.attendance(r.status);
           return '<tr><td class="is-primary"><span class="fg-person-name">' + esc(r.name) + "</span></td>" +
-            '<td data-label="Điểm danh">' + FG.badge(att.label, att.tone, att.icon) + "</td>" +
+            '<td data-label="Điểm danh">' + FG.badge(att.label, att.tone, att.icon) + (r.source === "TEACHER_CORRECTED" ? " " + FG.badge("GV sửa", "info", "fa-pen") : "") + "</td>" +
+            '<td data-label="Giáo viên sửa">' + editSel(r) + "</td>" +
             (isLive ? '<td data-label="Vào lớp sau">' + (r.checkin === null || r.checkin === undefined ? '<span class="fg-muted">—</span>' : esc(FG.duration(r.checkin))) + "</td>" +
                       '<td class="is-num" data-label="Trong khung hình">' + esc(FG.duration(r.visible)) + "</td>" : "") +
             '<td class="is-num" data-label="Số lần rời chỗ">' + (r.away_count || 0) + "</td>" +
@@ -777,6 +791,7 @@
       else { $("anHour").textContent = "Chưa đủ dữ liệu"; $("anHour").classList.add("is-na"); setText("anHourSub", "Cần thêm dữ liệu theo giờ"); }
       const bd = summary.breakdown || {};
       setText("anEvents", bd.total || 0);
+      if (bd.excluded_false_positives) setText("anEventsSub", "Không tính " + bd.excluded_false_positives + " sự kiện giáo viên xác nhận báo nhầm");
 
       // trend
       if (measured.length < 2) {
@@ -809,11 +824,13 @@
         });
       }
 
-      // watch list
+      // watch list (name order; a heuristic prompt for a conversation, not a ranking)
       const watch = summary.watchlist || [];
+      const rule = summary.watchlist_rule || { score_below: 70, min_sessions: 2 };
+      $("watchRule").textContent = "Điểm ước lượng trung bình dưới " + rule.score_below + " trong ít nhất " + rule.min_sessions + " buổi đã đo. Sắp xếp theo tên.";
       if (!watch.length) {
         FG.setState($("watchBody"), { compact: true, icon: "fa-circle-check", title: "Chưa có học sinh nào trong danh sách",
-          text: summary.class_sessions >= 2 ? "Không học sinh nào có điểm trung bình dưới 70 qua các buổi đã đo." : "Cần ít nhất 2 buổi học có điểm cho mỗi học sinh." });
+          text: summary.class_sessions >= rule.min_sessions ? "Không học sinh nào có điểm trung bình dưới " + rule.score_below + " qua các buổi đã đo." : "Cần ít nhất " + rule.min_sessions + " buổi học có điểm cho mỗi học sinh." });
       } else {
         $("watchBody").innerHTML = '<ul class="fg-list">' + watch.map((w) =>
           '<li class="fg-event"><span class="fg-avatar" aria-hidden="true">' + esc(FG.initials(w.display_name)) + "</span>" +
@@ -828,8 +845,8 @@
         FG.setState($("leaderBody"), { compact: true, icon: "fa-calendar-day", title: "Hôm nay chưa có buổi học nào kết thúc",
           text: "Điểm trung bình trong ngày hiện sau khi buổi học kết thúc." });
       } else {
-        $("leaderBody").innerHTML = '<ul class="fg-list">' + list.map((w, i) =>
-          '<li class="fg-event"><span class="fg-avatar" aria-hidden="true">' + (i + 1) + "</span>" +
+        $("leaderBody").innerHTML = '<ul class="fg-list">' + list.map((w) =>
+          '<li class="fg-event"><span class="fg-avatar" aria-hidden="true">' + esc(FG.initials(w.display_name)) + "</span>" +
           '<div class="fg-event-main"><div class="fg-event-title">' + esc(w.display_name) + "</div></div>" +
           FG.badge(w.score + "/100", FG.scoreTone(w.score)) + "</li>").join("") + "</ul>";
       }
@@ -1037,17 +1054,19 @@
       html += d.students.length ? '<div class="fg-table-wrap mb-4"><table class="fg-table is-stack"><thead><tr><th>Học sinh</th><th>Điểm danh</th><th class="is-num">Điểm trung bình</th><th class="is-num">Rời chỗ</th></tr></thead><tbody>' +
         d.students.map((s) => { const att = FG.attendance(s.attendance_status);
           return '<tr><td class="is-primary"><span class="fg-person-name">' + esc(s.name) + "</span></td>" +
-            '<td data-label="Điểm danh">' + FG.badge(att.label, att.tone, att.icon) + "</td>" +
+            '<td data-label="Điểm danh">' + FG.badge(att.label, att.tone, att.icon) + (s.attendance_source === "TEACHER_CORRECTED" ? " " + FG.badge("GV sửa", "info", "fa-pen") : "") + "</td>" +
             '<td class="is-num" data-label="Điểm trung bình">' + (FG.hasScore(s.average_score) ? s.average_score : '<span class="fg-muted">Chưa có</span>') + "</td>" +
             '<td class="is-num" data-label="Rời chỗ">' + s.away_count + " lần</td></tr>"; }).join("") + "</tbody></table></div>"
         : FG.stateHTML({ compact: true, title: "Không có dữ liệu học sinh cho buổi này" });
-      html += '<h3 class="fg-card-title mb-2">Hành vi đã ghi nhận</h3>';
-      html += d.events.length ? '<div class="fg-table-wrap"><table class="fg-table is-stack"><thead><tr><th>Thời điểm</th><th>Học sinh</th><th>Hành vi</th><th class="is-num">Kéo dài</th></tr></thead><tbody>' +
-        d.events.map((e) => { const b = FG.behavior(e.type);
+      html += '<h3 class="fg-card-title mb-2">Tín hiệu AI đã ghi nhận</h3>';
+      html += d.events.length ? '<div class="fg-table-wrap"><table class="fg-table is-stack"><caption class="fg-sr-only">Tín hiệu AI của buổi học và kết quả giáo viên xem lại</caption><thead><tr><th scope="col">Thời điểm</th><th scope="col">Học sinh</th><th scope="col">Tín hiệu AI</th><th scope="col">Hoạt động</th><th scope="col" class="is-num">Kéo dài</th><th scope="col">Giáo viên xem lại</th></tr></thead><tbody>' +
+        d.events.map((e) => { const b = FG.behavior(e.type), r = FG.review(e.review_state);
           return '<tr><td class="is-primary fg-num">' + esc(FG.time(e.start_time)) + "</td>" +
             '<td data-label="Học sinh">' + esc(e.name) + "</td>" +
-            '<td data-label="Hành vi">' + FG.badge(b.label, b.tone, b.icon) + "</td>" +
-            '<td class="is-num" data-label="Kéo dài">' + esc(FG.duration(e.duration_seconds)) + "</td></tr>"; }).join("") + "</tbody></table></div>"
+            '<td data-label="Tín hiệu AI">' + FG.badge(b.label, b.tone, b.icon) + "</td>" +
+            '<td data-label="Hoạt động">' + esc(FG.contextLabel(e.activity_context)) + "</td>" +
+            '<td class="is-num" data-label="Kéo dài">' + esc(FG.duration(e.duration_seconds)) + "</td>" +
+            '<td data-label="Giáo viên xem lại">' + FG.badge(r.label, r.tone, r.icon) + "</td></tr>"; }).join("") + "</tbody></table></div>"
         : FG.stateHTML({ compact: true, icon: "fa-circle-check", title: "Không ghi nhận hành vi kéo dài nào trong buổi này" });
       body.innerHTML = html;
     } catch (e) {
@@ -1056,7 +1075,9 @@
   }
 
   function downloadCsv(filename, rows) {
-    const csv = rows.map((r) => r.map((v) => '"' + String(v === null || v === undefined ? "" : v).replace(/"/g, '""') + '"').join(",")).join("\r\n");
+    // values starting with = + - @ are prefixed with ' so a spreadsheet never runs them as formulas
+    const cell = (v) => { let t = String(v === null || v === undefined ? "" : v); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return '"' + t.replace(/"/g, '""') + '"'; };
+    const csv = rows.map((r) => r.map(cell).join(",")).join("\r\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);

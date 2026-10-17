@@ -22,18 +22,19 @@ FocusGuard • Bảng A THCS
 
 ## 3:05–4:05 • Kiểm thử
 
-“Hệ thống có 184 bài kiểm thử tự động đều đạt, 6 bài kiểm thử cơ sở dữ liệu Firestore trên máy giả lập đều đạt, và 3 bài kiểm thử phần cứng đều đạt. Chúng em đã chạy camera thật trên MacBook Air M3, khoảng 7,5 khung hình mỗi giây. Các tình huống dùng điện thoại, rời chỗ, ngắt camera đã chạy được. Nhưng mới chỉ thử với một người và chưa có bộ dữ liệu lớp học thật được gán nhãn, nên chúng em chưa công bố độ chính xác; hồ sơ ghi rõ là chưa đánh giá.”
+“Hệ thống có 675 bài kiểm thử tự động đều đạt, 24 bài kiểm thử cơ sở dữ liệu Firestore trên máy giả lập đều đạt, và 3 bài kiểm thử phần cứng đều đạt. Chúng em đã chạy camera thật trên MacBook Air M3, khoảng 7,5 khung hình mỗi giây. Các tình huống dùng điện thoại, rời chỗ, ngắt camera đã chạy được. Nhưng mới chỉ thử với một người và chưa có bộ dữ liệu lớp học thật được gán nhãn, nên chúng em chưa công bố độ chính xác; hồ sơ ghi rõ là chưa đánh giá. Sau góp ý của Ban Tổ chức, chúng em đã làm xong khung đánh giá lớp học thật: giáo viên chọn hoạt động như chép bài hay thảo luận nhóm, người quan sát gán nhãn, hệ thống tính tỷ lệ đúng và cảnh báo sai mỗi giờ, và chỉ hiện con số khi đủ dữ liệu. Chúng em có một công cụ dẫn từng bước qua 15 tình huống Ban Tổ chức nêu, như hai bạn đi cắt nhau, người lạ, che mặt, lớp đông. Phần chạy trong lớp thật vẫn cần làm với học sinh đã đồng ý.”
 
 ## 4:05–4:45 • An toàn & kết
 
-“FocusGuard không nhận diện cảm xúc, không đo hướng nhìn và không ghi video. Hệ thống chỉ là tín hiệu hỗ trợ giáo viên, không dùng để tự động kỷ luật hay chấm hạnh kiểm. Bước tiếp theo của chúng em là đánh giá trên dữ liệu có sự đồng ý và có người gán nhãn, và cải thiện việc phát hiện điện thoại vì hiện còn đứt đoạn. Chúng em muốn AI trong lớp học phải hữu ích, minh bạch và có trách nhiệm.”
+“FocusGuard không nhận diện cảm xúc, không đo hướng nhìn, và mặc định không lưu video; chế độ minh chứng chỉ lưu đoạn ngắn khi được phép và tự xóa. Nhận diện khuôn mặt chỉ dùng khi phụ huynh đồng ý, và phụ huynh có thể thu hồi. Khi AI báo, giáo viên xem lại và có thể bấm ‘Báo nhầm’. Hệ thống chỉ là tín hiệu hỗ trợ giáo viên, không dùng để tự động kỷ luật hay chấm hạnh kiểm. Bước tiếp theo của chúng em là đánh giá trên dữ liệu có sự đồng ý và có người gán nhãn, và cải thiện việc phát hiện điện thoại vì hiện còn đứt đoạn. Chúng em muốn AI trong lớp học phải hữu ích, minh bạch và có trách nhiệm.”
 
 # Những câu tuyệt đối không nói
 
 - “AI của em đo chính xác mức độ tập trung của học sinh.”
 - “Nhóm em tự xây YOLO/InsightFace.”
 - “Hệ thống đã đạt độ chính xác X%” khi chưa có bộ dữ liệu thật gán nhãn.
-- “184 bài kiểm thử đạt nghĩa là AI chính xác.” (Kiểm thử chỉ chứng minh mã chạy đúng thiết kế.)
+- “Hàng trăm bài kiểm thử đạt nghĩa là AI chính xác.” (Kiểm thử chỉ chứng minh mã chạy đúng thiết kế.)
+- “Kết quả chạy thử mô phỏng là độ chính xác của hệ thống.” (Mô phỏng chỉ kiểm tra công cụ.)
 - “Toàn bộ mã do chúng em tự gõ.” (Phải nói rõ có dùng trợ lý lập trình AI.)
 
 # Mẹo trình bày

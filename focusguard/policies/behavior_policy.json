@@ -1,0 +1,54 @@
+{
+  "policy_version": "context-policy-2026.10-1",
+  "calibration_status": "UNCALIBRATED_DEFAULT",
+  "note": "Initial values chosen from pedagogy, NOT from measured classroom data. They must be re-calibrated with scripts/calibrate_behavior.py on a consented, annotated real classroom evaluation before being trusted. When no context is selected FocusGuard behaves exactly as before (multiplier 1.0, alert on).",
+  "default": {"penalty_multiplier": 1.0, "alert": true, "interpretation": "SIGNAL", "severity": "normal"},
+  "contexts": {
+    "LECTURE": {},
+    "WRITING": {
+      "HEAD_AWAY": {
+        "penalty_multiplier": 0.5, "alert": false, "interpretation": "REDUCED_IN_CONTEXT", "escalate_after_seconds": 45,
+        "directions": {
+          "DOWN": {"penalty_multiplier": 0.0, "alert": false, "interpretation": "EXPECTED_IN_CONTEXT", "escalate_after_seconds": null},
+          "UP": {"penalty_multiplier": 0.0, "alert": false, "interpretation": "EXPECTED_IN_CONTEXT", "escalate_after_seconds": null}
+        }
+      },
+      "DROWSY": {"penalty_multiplier": 0.0, "alert": false, "interpretation": "AMBIGUOUS_IN_CONTEXT", "escalate_after_seconds": 20}
+    },
+    "LOOKING_AT_BOARD": {
+      "HEAD_AWAY": {
+        "penalty_multiplier": 0.5, "alert": false, "interpretation": "REDUCED_IN_CONTEXT", "escalate_after_seconds": 30,
+        "directions": {
+          "UP": {"penalty_multiplier": 0.0, "alert": false, "interpretation": "EXPECTED_IN_CONTEXT", "escalate_after_seconds": null}
+        }
+      }
+    },
+    "GROUP_DISCUSSION": {
+      "HEAD_AWAY": {"penalty_multiplier": 0.0, "alert": false, "interpretation": "EXPECTED_IN_CONTEXT"},
+      "AWAY": {"penalty_multiplier": 0.0, "alert": false, "interpretation": "REDUCED_IN_CONTEXT", "escalate_after_seconds": 180}
+    },
+    "SELF_STUDY": {
+      "HEAD_AWAY": {
+        "penalty_multiplier": 1.0, "alert": true, "interpretation": "SIGNAL",
+        "directions": {
+          "DOWN": {"penalty_multiplier": 0.0, "alert": false, "interpretation": "EXPECTED_IN_CONTEXT"}
+        }
+      }
+    },
+    "EXAM": {
+      "PHONE": {"penalty_multiplier": 1.0, "alert": true, "interpretation": "SIGNAL", "severity": "high"},
+      "HEAD_AWAY": {
+        "penalty_multiplier": 1.0, "alert": true, "interpretation": "SIGNAL",
+        "directions": {
+          "DOWN": {"penalty_multiplier": 0.0, "alert": false, "interpretation": "EXPECTED_IN_CONTEXT"}
+        }
+      },
+      "DROWSY": {"penalty_multiplier": 0.0, "alert": false, "interpretation": "AMBIGUOUS_IN_CONTEXT", "escalate_after_seconds": 20}
+    },
+    "TRANSITION": {
+      "HEAD_AWAY": {"penalty_multiplier": 0.0, "alert": false, "interpretation": "EXPECTED_IN_CONTEXT"},
+      "AWAY": {"penalty_multiplier": 0.0, "alert": false, "interpretation": "EXPECTED_IN_CONTEXT"},
+      "DROWSY": {"penalty_multiplier": 0.5, "alert": false, "interpretation": "REDUCED_IN_CONTEXT", "escalate_after_seconds": 30}
+    }
+  }
+}

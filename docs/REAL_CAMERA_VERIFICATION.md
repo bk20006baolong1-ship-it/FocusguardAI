@@ -6,8 +6,7 @@ kết quả thực tế vẫn là `NOT_EVALUATED` cho tới khi có bộ dữ li
 ## 0. Chuẩn bị (một lần)
 
 ```bash
-cd /Users/dkdeveloper/projects/focusguardAI
-git checkout fix/competition-core-hardening
+git clone https://github.com/DKTECHVN/focusAI && cd focusAI      # repo chính thức, nhánh main
 source .venv/bin/activate            # hoặc: python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt      # OpenCV, MediaPipe, ultralytics (YOLOv8), insightface, onnxruntime, eventlet, Firestore libs
 python tools/download_models.py      # tải InsightFace buffalo_sc vào ~/.insightface (cần mạng, một lần)
@@ -161,12 +160,14 @@ Lặp lại kịch bản 2–5 và 8, rồi kiểm tra bảng `sessions` và `fo
 
 ## 5. Ghi nhận hiệu năng
 Ghi lại FPS quan sát được: video mượt hay giật, và độ trễ từ lúc cầm điện thoại đến khi dashboard báo.
-Chưa có công cụ đo tự động, nên phần hiệu năng vẫn là `HARDWARE_REQUIRED`.
+`python tools/field_test.py` đo tự động FPS thực, độ trễ mỗi khung hình (P50/P95) và độ trễ danh tính trên máy này
+(`performance-report.json`, `benchmark_kind = FULL_DETECTOR_CAMERA`). Cho tới khi chạy trên máy thật: `HARDWARE_REQUIRED`.
 
 ## 6. Dữ liệu thật và đánh giá độ chính xác
-* Repo **chưa có** công cụ ghi dữ liệu để gán nhãn. `scripts/run_evaluation.py --real-dataset <file.json>` nhận file JSON gồm
-  `episodes_gt`, `episodes_pred`, `identity_frames`, `duration_seconds` (xem `focusguard/evaluation/runner.py`).
-  Chưa có file đó thì kết quả là **NOT_EVALUATED**.
+* Công cụ ghi dữ liệu để gán nhãn: `python tools/field_test.py` (15 kịch bản, mẫu bảng nhãn) và
+  `python scripts/finalize_real_classroom_evaluation.py <id>` (chỉ số + báo cáo). Quy trình:
+  [REAL_CLASSROOM_EVALUATION_PROTOCOL.md](REAL_CLASSROOM_EVALUATION_PROTOCOL.md). Chưa chạy trên lớp thật thì kết quả là
+  **NOT_EVALUATED**.
 * Chỉ thu dữ liệu khi có **đồng ý bằng văn bản** của học sinh và phụ huynh. Lưu trong `evaluation/private/` hoặc
   `evaluation/datasets/` (đã git-ignore). **Không commit** video, ảnh khuôn mặt hay nhãn chứa danh tính thật.
 

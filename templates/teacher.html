@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% set titles = {
   'dashboard': 'Giám sát lớp học', 'students': 'Học sinh', 'attendance': 'Điểm danh', 'alerts': 'Cảnh báo',
-  'analytics': 'Phân tích', 'reports': 'Lịch sử buổi học', 'settings': 'Cài đặt'
+  'analytics': 'Phân tích', 'reports': 'Lịch sử buổi học', 'settings': 'Cài đặt',
+  'events': 'Sự kiện', 'evaluation': 'Đánh giá thực tế'
 } %}
 {% block title %}{{ titles[active_tab] }}{% endblock %}
 {% block page_title %}{{ titles[active_tab] }}{% endblock %}
@@ -70,8 +71,39 @@
         <i class="fa-solid fa-stop" aria-hidden="true"></i>Kết thúc buổi học
       </button>
     </div>
+    <div class="fg-card-body fg-class-camera" id="classCameraRow">
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" id="initFirst" checked>
+        <label class="form-check-label" for="initFirst">Khởi tạo danh sách bằng camera trước khi theo dõi (gắn tên học sinh trên hình)</label>
+      </div>
+      <div class="fg-row">
+        <label class="form-label mb-0" for="classCameraSelect"><i class="fa-solid fa-video me-1" aria-hidden="true"></i>Camera</label>
+        <select class="form-select fg-class-camera-select" id="classCameraSelect" aria-describedby="classCameraHelp"></select>
+        <a class="btn btn-link btn-sm" href="{{ url_for('settings_cameras') }}">Cài đặt › Camera</a>
+      </div>
+      <p class="fg-caption mb-0" id="classCameraHelp" role="status" aria-live="polite"></p>
+    </div>
     <div class="fg-card-footer" id="modeHelp">
       Camera lớp học: một camera đặt trong lớp quan sát cả lớp. Lớp trực tuyến: mỗi học sinh tự bật camera trên máy của mình.
+    </div>
+  </section>
+
+  <section class="fg-card" aria-labelledby="contextTitle" id="contextCard">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="contextTitle">Hoạt động của lớp</h2>
+        <p class="fg-caption mb-0">Giáo viên chọn hoạt động; AI không tự đoán. Hoạt động giúp hiểu đúng tín hiệu, ví dụ cúi đầu khi chép bài không bị tính là mất tập trung.</p>
+      </div>
+      <span class="fg-badge" id="contextBadge" data-tone="neutral"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>Chưa chọn hoạt động</span>
+    </div>
+    <div class="fg-card-body">
+      <div class="fg-chip-group" role="group" aria-label="Chọn hoạt động của lớp" id="contextButtons">
+        <button type="button" class="fg-chip" data-context="" aria-pressed="true" disabled>Chưa chọn</button>
+        {% for key, label in activity_contexts %}
+        <button type="button" class="fg-chip" data-context="{{ key }}" aria-pressed="false" disabled>{{ label }}</button>
+        {% endfor %}
+      </div>
+      <p class="fg-helper mb-0" id="contextHelp" aria-live="polite">Bắt đầu buổi học để chọn hoạt động.</p>
     </div>
   </section>
 
@@ -135,15 +167,39 @@
           <span class="fg-badge" id="cameraBadge" data-tone="neutral"><i class="fa-solid fa-video-slash" aria-hidden="true"></i>Chưa bật</span>
         </div>
         <div class="fg-card-body">
-          <div class="fg-camera">
+          <div class="fg-camera" id="cameraBox">
             <img id="cameraFeed" alt="Hình ảnh trực tiếp từ camera lớp học" hidden>
+            <div class="fg-track-layer" id="trackOverlay" aria-label="Người trong khung hình" hidden></div>
             <div class="fg-camera-state" id="cameraState">
               <i class="fa-solid fa-video-slash" aria-hidden="true"></i>
               <div class="fg-camera-state-title">Camera chưa bật</div>
               <p class="fg-camera-state-text">Bắt đầu buổi học ở chế độ Camera lớp học để bật camera.</p>
             </div>
           </div>
-          <p class="fg-helper mb-0"><i class="fa-solid fa-shield-halved me-1" aria-hidden="true"></i>Hình ảnh được phân tích trực tiếp, không ghi hình và không lưu ảnh.</p>
+          <p class="fg-caption mb-1" id="cameraSourceInfo" role="status" aria-live="polite"></p>
+          <p class="fg-helper mb-0"><i class="fa-solid fa-shield-halved me-1" aria-hidden="true"></i>{{ privacy_notice }}</p>
+        </div>
+      </section>
+
+      <section class="fg-card" aria-labelledby="identityTitle" id="identityCard" hidden>
+        <div class="fg-card-header">
+          <div>
+            <h2 class="fg-card-title" id="identityTitle">Danh sách lớp bằng camera</h2>
+            <p class="fg-caption mb-0" id="identityPhase"></p>
+          </div>
+          <div class="fg-row">
+            <button type="button" class="btn btn-secondary btn-sm" id="initBtn" hidden><i class="fa-solid fa-user-tag" aria-hidden="true"></i>Khởi tạo danh sách</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="confirmSuggestBtn"><i class="fa-solid fa-check-double" aria-hidden="true"></i>Xác nhận các đề xuất độ tin cậy cao</button>
+            <button type="button" class="btn btn-primary btn-sm" id="beginBtn" hidden><i class="fa-solid fa-play" aria-hidden="true"></i>Hoàn tất danh sách &amp; bắt đầu</button>
+          </div>
+        </div>
+        <div class="fg-card-body">
+          <p class="mb-2 fg-identity-counts" id="identityCounts" role="status" aria-live="polite"></p>
+          <div class="fg-banner mb-2" data-tone="warning" id="identityWarning" role="note" hidden>
+            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span></span>
+          </div>
+          <p class="fg-caption" id="identityHelp">Bấm vào khung một người trên hình camera để gắn tên học sinh. Gắn tên chỉ dùng cho buổi học này; mẫu nhận diện chỉ được tạo khi học sinh có đồng ý nhận diện khuôn mặt còn hiệu lực.</p>
+          <ul class="fg-list fg-identity-roster" id="identityRoster" aria-label="Danh sách học sinh và trạng thái nhận diện"></ul>
         </div>
       </section>
 
@@ -153,6 +209,17 @@
           <a class="btn btn-link btn-sm" href="{{ url_for('teacher_alerts') }}">Xem tất cả</a>
         </div>
         <div class="fg-card-body is-flush fg-scroll" id="logList"></div>
+      </section>
+
+      <section class="fg-card" aria-labelledby="reviewQueueTitle">
+        <div class="fg-card-header">
+          <div>
+            <h2 class="fg-card-title" id="reviewQueueTitle">Cần giáo viên xem lại</h2>
+            <p class="fg-caption mb-0">Học sinh có nhiều sự kiện AI chưa được xác nhận. Danh sách để giáo viên kiểm tra lại, không phải nhận xét về học sinh.</p>
+          </div>
+          <a class="btn btn-link btn-sm" href="{{ url_for('teacher_events') }}">Mở trang Sự kiện</a>
+        </div>
+        <div class="fg-card-body is-flush" id="reviewQueue" aria-live="polite"></div>
       </section>
     </div>
   </div>
@@ -221,13 +288,271 @@
   </section>
   {% endif %}
 
+
+  {# ───────────────────────────── Sự kiện ───────────────────────────── #}
+  {% if active_tab == 'events' %}
+  <section class="fg-card" aria-labelledby="eventsFilterTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="eventsFilterTitle">Sự kiện cần xem lại</h2>
+        <p class="fg-caption mb-0">Mỗi dòng là một tín hiệu AI phát hiện. Giáo viên xác nhận đúng, báo nhầm hoặc đánh dấu không chắc. Dữ liệu gốc của AI không bị sửa.</p>
+      </div>
+    </div>
+    <div class="fg-card-body">
+      <form class="fg-filters" id="eventFilters" aria-label="Lọc sự kiện">
+        <div>
+          <label class="form-label" for="fStudent">Học sinh</label>
+          <select class="form-select" id="fStudent"><option value="">Tất cả học sinh</option></select>
+        </div>
+        <div>
+          <label class="form-label" for="fDate">Ngày</label>
+          <input type="date" class="form-control" id="fDate">
+        </div>
+        <div>
+          <label class="form-label" for="fType">Loại tín hiệu</label>
+          <select class="form-select" id="fType">
+            <option value="">Tất cả</option>
+            <option value="PHONE">Dùng điện thoại</option>
+            <option value="DROWSY">Buồn ngủ</option>
+            <option value="HEAD_AWAY">Quay đi chỗ khác</option>
+            <option value="AWAY">Rời chỗ</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label" for="fStatus">Trạng thái xem lại</label>
+          <select class="form-select" id="fStatus">
+            <option value="">Tất cả</option>
+            <option value="UNREVIEWED" selected>Chưa xem lại</option>
+            <option value="CONFIRMED">Giáo viên xác nhận đúng</option>
+            <option value="FALSE_POSITIVE">Giáo viên xác nhận báo nhầm</option>
+            <option value="UNCERTAIN">Không chắc</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label" for="fContext">Hoạt động</label>
+          <select class="form-select" id="fContext">
+            <option value="">Tất cả</option>
+            <option value="NONE">Chưa chọn hoạt động</option>
+            {% for key, label in activity_contexts %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="fg-filters-actions">
+          <button type="button" class="btn btn-secondary" id="fReset">Xóa bộ lọc</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="fg-grid fg-grid-metrics" aria-label="Phản hồi của giáo viên">
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Sự kiện AI</span><span class="fg-metric-value" id="rmEvents">—</span><span class="fg-metric-sub">Tín hiệu AI đã ghi nhận</span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Đã xem lại</span><span class="fg-metric-value" id="rmCoverage">—</span><span class="fg-metric-sub" id="rmCoverageSub"></span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Giáo viên xác nhận đúng</span><span class="fg-metric-value" id="rmConfirmed">—</span><span class="fg-metric-sub">Sự kiện đã được xác nhận</span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Giáo viên xác nhận báo nhầm</span><span class="fg-metric-value" id="rmFalse">—</span><span class="fg-metric-sub">Dùng để hiệu chỉnh ngưỡng</span></div>
+  </section>
+
+  <section class="fg-card" aria-labelledby="eventsTitle">
+    <div class="fg-card-header">
+      <h2 class="fg-card-title" id="eventsTitle">Lịch sử sự kiện</h2>
+      <span class="fg-caption" id="eventsCount" aria-live="polite"></span>
+    </div>
+    <div class="fg-card-body is-flush" id="eventsBody" aria-live="polite"></div>
+  </section>
+
+  <section class="fg-card" aria-labelledby="feedbackTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="feedbackTitle">Tỉ lệ theo phản hồi của giáo viên</h2>
+        <p class="fg-caption mb-0">Tách riêng sự kiện AI và sự kiện giáo viên đã xác nhận. Tỉ lệ chỉ hiện khi có đủ số sự kiện đã xem lại.</p>
+      </div>
+    </div>
+    <div class="fg-card-body is-flush" id="feedbackBody"></div>
+  </section>
+  {% endif %}
+
+  {# ───────────────────────────── Đánh giá thực tế ───────────────────────────── #}
+  {% if active_tab == 'evaluation' %}
+  <div class="fg-banner" data-tone="info" role="note">
+    <i class="fa-solid fa-flask" aria-hidden="true"></i>
+    <div>
+      <div class="fg-banner-title">Buổi đánh giá có giám sát, tách riêng khỏi dữ liệu học tập</div>
+      <div>Dùng để đo độ chính xác trên lớp học thật: ghi thông tin camera, chọn hoạt động, người quan sát gán nhãn theo thời gian. Chỉ lưu số liệu (không ảnh, không video). Chỉ học sinh đã đồng ý phạm vi "Tham gia đánh giá thử nghiệm" mới được gán nhãn. Kết quả chỉ được dùng khi đủ dữ liệu.</div>
+    </div>
+  </div>
+
+  <section class="fg-card" aria-labelledby="evalStartTitle" id="evalStartCard">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="evalStartTitle">Bắt đầu buổi đánh giá</h2>
+        <p class="fg-caption mb-0" id="evalParticipants">Đang tải…</p>
+      </div>
+    </div>
+    <div class="fg-card-body">
+      <form id="evalForm" novalidate>
+        <div class="fg-banner mb-3" data-tone="danger" id="evalFormError" role="alert" hidden>
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span></span>
+        </div>
+        <div class="fg-grid fg-grid-3" style="gap: var(--fg-4);">
+          <div class="fg-field" style="grid-column: span 2;">
+            <label class="form-label" for="eCamera">Camera dùng để đánh giá</label>
+            <select class="form-select" id="eCamera" aria-describedby="eCameraHelp"></select>
+            <div class="fg-helper" id="eCameraHelp" role="status" aria-live="polite"></div>
+            <div class="fg-helper">Đổi mật khẩu hoặc thêm camera ở <a href="{{ url_for('settings_cameras') }}">Cài đặt › Camera</a>.</div>
+          </div>
+          <div class="fg-field">
+            <label class="form-label" for="eCameraPosition">Vị trí camera</label>
+            <select class="form-select" id="eCameraPosition">
+              <option value="FRONT_ABOVE_BOARD">Phía trên bảng</option>
+              <option value="FRONT_CORNER" selected>Góc trước lớp</option>
+              <option value="SIDE_WALL">Tường bên</option>
+              <option value="BACK_CORNER">Góc cuối lớp</option>
+              <option value="TEACHER_DESK">Bàn giáo viên</option>
+              <option value="LAPTOP_WEBCAM">Webcam laptop</option>
+              <option value="OTHER">Khác</option>
+            </select>
+          </div>
+          <div class="fg-field">
+            <label class="form-label" for="eCameraAngle">Góc / độ cao camera</label>
+            <input type="text" class="form-control" id="eCameraAngle" maxlength="60" placeholder="Ví dụ: cao 2,2 m, nghiêng 20°">
+          </div>
+          <div class="fg-field">
+            <label class="form-label" for="eResolution">Độ phân giải</label>
+            <input type="text" class="form-control" id="eResolution" maxlength="20" placeholder="1280x720">
+          </div>
+          <div class="fg-field">
+            <label class="form-label" for="eFps">FPS mục tiêu</label>
+            <input type="number" class="form-control" id="eFps" min="1" max="60" step="0.5" placeholder="7.5">
+          </div>
+          <div class="fg-field">
+            <label class="form-label" for="eDevice">Thiết bị</label>
+            <input type="text" class="form-control" id="eDevice" maxlength="120" placeholder="Ví dụ: MacBook Air M3 + webcam USB">
+          </div>
+          <div class="fg-field">
+            <label class="form-label" for="eLighting">Ánh sáng</label>
+            <select class="form-select" id="eLighting">
+              <option value="DAYLIGHT">Ánh sáng tự nhiên</option>
+              <option value="MIXED">Hỗn hợp</option>
+              <option value="ARTIFICIAL">Đèn trong lớp</option>
+              <option value="LOW_LIGHT">Thiếu sáng</option>
+              <option value="BACKLIT">Ngược sáng</option>
+              <option value="OTHER">Khác</option>
+            </select>
+          </div>
+          <div class="fg-field">
+            <label class="form-label" for="eContext">Hoạt động ban đầu</label>
+            <select class="form-select" id="eContext">
+              {% for key, label in activity_contexts %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="fg-field" style="grid-column: span 2;">
+            <label class="form-label" for="eNotes">Ghi chú</label>
+            <input type="text" class="form-control" id="eNotes" maxlength="1000" placeholder="Sĩ số, sắp xếp chỗ ngồi, người quan sát…">
+          </div>
+        </div>
+        <div class="form-check fg-field">
+          <input class="form-check-input" type="checkbox" id="eConsent" aria-describedby="eConsentHelp">
+          <label class="form-check-label" for="eConsent">Tôi xác nhận học sinh và phụ huynh đã được thông báo và đồng ý; camera đặt công khai, không ghi hình lén.</label>
+          <div class="fg-helper" id="eConsentHelp">Máy chủ vẫn kiểm tra bản ghi đồng ý của từng học sinh. Học sinh chưa đồng ý không được gán nhãn và không có trong gói dữ liệu.</div>
+        </div>
+        <button type="submit" class="btn btn-primary" id="evalStart"><i class="fa-solid fa-play" aria-hidden="true"></i>Bắt đầu đánh giá</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="fg-card" aria-labelledby="evalActiveTitle" id="evalActiveCard" hidden>
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="evalActiveTitle">Buổi đánh giá đang chạy</h2>
+        <p class="fg-caption mb-0" id="evalActiveMeta"></p>
+      </div>
+      <button type="button" class="btn btn-danger" id="evalEnd"><i class="fa-solid fa-stop" aria-hidden="true"></i>Kết thúc đánh giá</button>
+    </div>
+    <div class="fg-card-body fg-stack" style="gap: var(--fg-4);">
+      <div class="fg-scenario" id="evalScenarioBox">
+        <div class="fg-filters">
+          <div>
+            <label class="form-label" for="eScenario">Kịch bản (theo góp ý BTC)</label>
+            <select class="form-select" id="eScenario" aria-describedby="eScenarioHelp"></select>
+          </div>
+          <div class="fg-filters-actions">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="eScenarioContext" checked>
+              <label class="form-check-label" for="eScenarioContext">Đổi hoạt động lớp theo kịch bản</label>
+            </div>
+            <button type="button" class="btn btn-primary" id="eScenarioStart"><i class="fa-solid fa-play" aria-hidden="true"></i>Bắt đầu kịch bản</button>
+            <button type="button" class="btn btn-secondary" id="eScenarioStop" disabled><i class="fa-solid fa-stop" aria-hidden="true"></i>Kết thúc kịch bản</button>
+          </div>
+        </div>
+        <div class="fg-helper" id="eScenarioHelp"></div>
+        <p class="fg-caption mb-0" id="eScenarioState" role="status" aria-live="polite"></p>
+        <div id="eScenarioRuns"></div>
+      </div>
+      <div>
+        <p class="fg-card-title mb-2" id="evalContextLabel">Hoạt động hiện tại</p>
+        <div class="fg-chip-group" role="group" aria-labelledby="evalContextLabel" id="evalContextButtons">
+          {% for key, label in activity_contexts %}
+          <button type="button" class="fg-chip" data-context="{{ key }}" aria-pressed="false">{{ label }}</button>
+          {% endfor %}
+        </div>
+      </div>
+      <form id="annForm" class="fg-filters" aria-label="Gán nhãn thực tế (ground truth)" novalidate>
+        <div>
+          <label class="form-label" for="aStudent">Học sinh</label>
+          <select class="form-select" id="aStudent"></select>
+        </div>
+        <div>
+          <label class="form-label" for="aLabel">Nhãn thực tế</label>
+          <select class="form-select" id="aLabel"></select>
+        </div>
+        <div>
+          <label class="form-label" for="aStart">Từ (phút:giây)</label>
+          <input type="text" class="form-control" id="aStart" inputmode="numeric" placeholder="00:00" aria-describedby="aTimeHelp">
+        </div>
+        <div>
+          <label class="form-label" for="aEnd">Đến (phút:giây)</label>
+          <input type="text" class="form-control" id="aEnd" inputmode="numeric" placeholder="00:30" aria-describedby="aTimeHelp">
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label class="form-label" for="aNote">Ghi chú</label>
+          <input type="text" class="form-control" id="aNote" maxlength="500">
+          <div class="fg-helper" id="aTimeHelp">Tính từ lúc bắt đầu buổi đánh giá. Hoặc bấm "Bắt đầu nhãn" rồi "Kết thúc nhãn" để ghi theo thời gian thực.</div>
+        </div>
+        <div class="fg-filters-actions" style="grid-column: 1 / -1;">
+          <button type="button" class="btn btn-secondary" id="aLiveStart"><i class="fa-solid fa-circle-dot" aria-hidden="true"></i>Bắt đầu nhãn</button>
+          <button type="button" class="btn btn-secondary" id="aLiveEnd" disabled><i class="fa-solid fa-circle-stop" aria-hidden="true"></i>Kết thúc nhãn</button>
+          <button type="submit" class="btn btn-primary" id="aSave">Lưu nhãn</button>
+          <span class="fg-caption" id="aLiveState" role="status" aria-live="polite"></span>
+        </div>
+      </form>
+      <div>
+        <p class="fg-card-title mb-2">Nhãn đã ghi (dữ liệu của người quan sát, tách riêng với kết quả AI)</p>
+        <div id="annList"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="fg-card" aria-labelledby="evalHistoryTitle">
+    <div class="fg-card-header"><h2 class="fg-card-title" id="evalHistoryTitle">Các buổi đánh giá</h2></div>
+    <div class="fg-card-body is-flush" id="evalHistory"></div>
+  </section>
+
+  <section class="fg-card" aria-labelledby="evalMetricsTitle" id="evalMetricsCard" hidden>
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="evalMetricsTitle">Chỉ số đánh giá</h2>
+        <p class="fg-caption mb-0" id="evalMetricsSub"></p>
+      </div>
+    </div>
+    <div class="fg-card-body is-flush" id="evalMetricsBody"></div>
+  </section>
+  {% endif %}
+
   {# ───────────────────────────── Phân tích ───────────────────────────── #}
   {% if active_tab == 'analytics' %}
   <section class="fg-grid fg-grid-metrics" aria-label="Chỉ số tổng hợp">
     <div class="fg-card fg-metric"><span class="fg-metric-label">Buổi học đã ghi nhận</span><span class="fg-metric-value" id="anSessions">—</span><span class="fg-metric-sub">Các buổi đã kết thúc</span></div>
     <div class="fg-card fg-metric"><span class="fg-metric-label">Điểm trung bình các buổi</span><span class="fg-metric-value" id="anAverage">—</span><span class="fg-metric-sub" id="anAverageSub"></span></div>
     <div class="fg-card fg-metric"><span class="fg-metric-label">Khung giờ điểm thấp nhất</span><span class="fg-metric-value" id="anHour" style="font-size: 1.25rem;">—</span><span class="fg-metric-sub" id="anHourSub"></span></div>
-    <div class="fg-card fg-metric"><span class="fg-metric-label">Sự kiện đã ghi nhận</span><span class="fg-metric-value" id="anEvents">—</span><span class="fg-metric-sub">Tổng các buổi</span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Sự kiện đã ghi nhận</span><span class="fg-metric-value" id="anEvents">—</span><span class="fg-metric-sub" id="anEventsSub">Tổng các buổi</span></div>
   </section>
   <div class="fg-grid fg-grid-2">
     <section class="fg-card" aria-labelledby="trendTitle">
@@ -241,8 +566,8 @@
     <section class="fg-card" aria-labelledby="watchTitle">
       <div class="fg-card-header">
         <div>
-          <h2 class="fg-card-title" id="watchTitle">Học sinh cần quan tâm thêm</h2>
-          <p class="fg-caption mb-0">Điểm trung bình dưới 70 trong ít nhất 2 buổi đã đo.</p>
+          <h2 class="fg-card-title" id="watchTitle">Có thể cần giáo viên trao đổi thêm</h2>
+          <p class="fg-caption mb-0" id="watchRule">Điểm ước lượng trung bình thấp qua nhiều buổi. Sắp xếp theo tên.</p>
         </div>
       </div>
       <div class="fg-card-body is-flush" id="watchBody"></div>
@@ -251,13 +576,23 @@
       <div class="fg-card-header">
         <div>
           <h2 class="fg-card-title" id="leaderTitle">Điểm trung bình hôm nay</h2>
-          <p class="fg-caption mb-0">Tính trên các buổi học đã kết thúc trong ngày.</p>
+          <p class="fg-caption mb-0">Tính trên các buổi học đã kết thúc trong ngày, sắp xếp theo tên. Điểm là ước lượng theo thời gian (heuristic), không phải xếp hạng học sinh.</p>
         </div>
       </div>
       <div class="fg-card-body is-flush" id="leaderBody"></div>
     </section>
   </div>
-  <p class="fg-helper">Số liệu lấy từ các buổi học đã ghi nhận của lớp. Chưa có số liệu đánh giá độ chính xác trên dữ liệu thực tế của trường.</p>
+  <section class="fg-card" aria-labelledby="aiVsTeacherTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="aiVsTeacherTitle">Sự kiện AI và sự kiện giáo viên xác nhận</h2>
+        <p class="fg-caption mb-0">Tín hiệu AI chưa phải kết luận. Cột "Giáo viên xác nhận đúng" chỉ đếm sự kiện giáo viên đã xem lại.</p>
+      </div>
+      <a class="btn btn-link btn-sm" href="{{ url_for('teacher_events') }}">Xem lại sự kiện</a>
+    </div>
+    <div class="fg-card-body is-flush" id="aiVsTeacherBody"></div>
+  </section>
+  <p class="fg-helper">Số liệu lấy từ các buổi học đã ghi nhận của lớp. Chưa có số liệu đánh giá độ chính xác trên dữ liệu thực tế của trường; khung đánh giá lớp học thật nằm ở trang Đánh giá thực tế.</p>
   {% endif %}
 
   {# ───────────────────────────── Lịch sử buổi học ───────────────────────────── #}
@@ -311,6 +646,35 @@
 
 {% block modals %}
 {% if current_class_id %}
+<div class="modal fade" id="eventModal" tabindex="-1" aria-labelledby="eventModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title" id="eventModalTitle">Xem lại sự kiện</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <div id="eventDetail"></div>
+        <div id="eventEvidence" class="mt-3"></div>
+        <div class="fg-field mt-3">
+          <label class="form-label" for="reviewNote">Ghi chú</label>
+          <textarea class="form-control" id="reviewNote" rows="2" maxlength="500" placeholder="Ví dụ: học sinh đang tra từ điển theo yêu cầu"></textarea>
+        </div>
+        <div class="fg-row" role="group" aria-label="Kết quả xem lại">
+          <button type="button" class="btn btn-success" data-verdict="CONFIRMED"><i class="fa-solid fa-check" aria-hidden="true"></i>Xác nhận đúng</button>
+          <button type="button" class="btn btn-warning" data-verdict="FALSE_POSITIVE"><i class="fa-solid fa-xmark" aria-hidden="true"></i>Báo nhầm</button>
+          <button type="button" class="btn btn-secondary" data-verdict="UNCERTAIN"><i class="fa-solid fa-question" aria-hidden="true"></i>Không chắc</button>
+        </div>
+        <p class="fg-helper" id="reviewStatus" role="status" aria-live="polite"></p>
+        <div id="eventHistory"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="offcanvas offcanvas-end" tabindex="-1" id="studentPanel" aria-labelledby="studentPanelTitle" style="width: min(440px, 100vw);">
   <div class="offcanvas-header">
     <h2 class="fg-section-title" id="studentPanelTitle">Chi tiết học sinh</h2>
@@ -336,6 +700,44 @@
   </div>
 </div>
 {% endif %}
+{% if active_tab == 'dashboard' %}
+<div class="modal fade" id="tagModal" tabindex="-1" aria-labelledby="tagTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <form class="modal-content" id="tagForm" novalidate>
+      <div class="modal-header">
+        <h2 class="modal-title" id="tagTitle">Gắn tên học sinh</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <p class="fg-caption" id="tagCurrent"></p>
+        <div class="fg-banner mb-3" data-tone="info" id="tagSuggestion" hidden>
+          <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+          <div><div class="fg-banner-title" id="tagSuggestionText"></div>
+            <div class="fg-row mt-2">
+              <button type="button" class="btn btn-primary btn-sm" id="tagAccept">Xác nhận</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="tagOther">Chọn học sinh khác</button>
+            </div>
+          </div>
+        </div>
+        <div class="fg-banner mb-3" data-tone="danger" id="tagError" role="alert" hidden>
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span></span>
+        </div>
+        <div id="tagPicker">
+          <label class="form-label" for="tagSearch">Tìm học sinh trong lớp</label>
+          <input type="search" class="form-control mb-2" id="tagSearch" placeholder="Gõ tên học sinh" autocomplete="off">
+          <div class="fg-tag-list" id="tagList" role="radiogroup" aria-label="Học sinh trong lớp"></div>
+        </div>
+        <p class="fg-caption mt-2 mb-0" id="tagStatus" role="status" aria-live="polite"></p>
+      </div>
+      <div class="modal-footer fg-cam-footer">
+        <button type="button" class="btn btn-outline-danger" id="tagRemove" hidden>Gỡ gắn</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+        <button type="submit" class="btn btn-primary" id="tagSave">Gắn tên</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -348,5 +750,7 @@
 <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
 {% if active_tab == 'analytics' %}<script src="{{ url_for('static', filename='js/chart.js') }}"></script>{% endif %}
 <script src="{{ url_for('static', filename='js/teacher.js') }}"></script>
+<script src="{{ url_for('static', filename='js/feedback.js') }}"></script>
+{% if active_tab == 'dashboard' %}<script src="{{ url_for('static', filename='js/classroom_identity.js') }}"></script>{% endif %}
 {% endif %}
 {% endblock %}

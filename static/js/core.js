@@ -77,9 +77,10 @@
     PRESENT: { label: "Có mặt", tone: "success", icon: "fa-user-check" },
     LATE:    { label: "Đi muộn", tone: "warning", icon: "fa-user-clock" },
     ABSENT:  { label: "Vắng mặt", tone: "danger", icon: "fa-user-slash" },
-    NOT_YET: { label: "Chưa điểm danh", tone: "neutral", icon: "fa-hourglass-half" },
+    NOT_SEEN: { label: "Chưa thấy", tone: "neutral", icon: "fa-hourglass-half" },
+    NOT_YET: { label: "Chưa thấy", tone: "neutral", icon: "fa-hourglass-half" },
   };
-  FG.attendance = (k) => FG.ATTENDANCE[k] || FG.ATTENDANCE.NOT_YET;
+  FG.attendance = (k) => FG.ATTENDANCE[k] || FG.ATTENDANCE.NOT_SEEN;
 
   /* What one student looks like right now. Derived only from server fields.
    * ctx = { active: bool, mode: "classroom"|"online"|"personal"|null } */
@@ -96,18 +97,52 @@
       return { key: "NOT_SEEN", label: ctx.mode === "classroom" ? "Chưa nhận diện" : "Chưa thấy trong khung hình",
                tone: "unknown", icon: "fa-circle-question",
                detail: ctx.mode === "classroom" ? "Chưa thấy học sinh này trong khung hình." : "Camera chưa ghi nhận khuôn mặt." };
+    const quiet = (type) => (s.behaviors || []).find((b) => b.type === type && b.alert === false);
+    if (s.visibility_status === "AWAY" && quiet("AWAY")) return FG.contextExpected("AWAY", s.not_visible_since, quiet("AWAY"));
     if (s.visibility_status === "AWAY") return Object.assign({ key: "AWAY", since: s.not_visible_since }, FG.BEHAVIOR.AWAY);
     if (s.visibility_status === "TEMPORARILY_NOT_VISIBLE")
       return Object.assign({ key: "TEMPORARILY_NOT_VISIBLE", since: s.not_visible_since,
                              detail: "Có thể bị che khuất. Chưa tính là rời chỗ." }, FG.BEHAVIOR.TEMPORARILY_NOT_VISIBLE);
     const first = (s.behaviors || []).find((b) => b.type === s.focus_state);
+    if ((s.focus_state === "PHONE" || s.focus_state === "DROWSY" || s.focus_state === "HEAD_AWAY") && first && first.alert === false)
+      return FG.contextExpected(s.focus_state, first.since, first);
     if (s.focus_state === "PHONE" || s.focus_state === "DROWSY" || s.focus_state === "HEAD_AWAY")
-      return Object.assign({ key: s.focus_state, since: first ? first.since : null,
+      return Object.assign({ key: s.focus_state, since: first ? first.since : null, severity: first ? first.severity : null,
                              confidence: first ? first.confidence : null }, FG.BEHAVIOR[s.focus_state]);
     if (s.focus_state === "FOCUSED") return Object.assign({ key: "FOCUSED" }, FG.BEHAVIOR.FOCUSED);
     return Object.assign({ key: "UNKNOWN", detail: "Chưa đủ dữ liệu quan sát." }, FG.BEHAVIOR.UNKNOWN);
   };
   FG.NEEDS_ATTENTION = ["PHONE", "DROWSY", "HEAD_AWAY", "AWAY"];
+  /* The AI saw a signal, but the teacher-chosen activity explains it
+   * (e.g. head down while writing): shown neutrally, not in "Cần chú ý". */
+  FG.contextExpected = (type, since, b) => {
+    const st = (b && b.interpreted_state) || "EXPECTED_IN_CONTEXT";
+    const m = b && typeof b.penalty_multiplier === "number" ? b.penalty_multiplier : 0;
+    const base = { key: "CONTEXT_EXPECTED", observed: type, since: since || null, tone: "neutral", icon: "fa-chalkboard" };
+    if (st === "REDUCED_IN_CONTEXT")
+      return Object.assign(base, { label: FG.behavior(type).label + " · giảm mức theo hoạt động",
+        detail: "AI phát hiện tín hiệu; theo hoạt động lớp đang chọn, điểm chỉ bị trừ " + Math.round(m * 100) + "% so với bình thường." });
+    if (st === "AMBIGUOUS_IN_CONTEXT")
+      return Object.assign(base, { label: FG.behavior(type).label + " · chưa rõ trong hoạt động này",
+        detail: "AI phát hiện tín hiệu nhưng chưa rõ ý nghĩa trong hoạt động này" + (m > 0 ? " (vẫn trừ " + Math.round(m * 100) + "% điểm)" : "") + ". Giáo viên xem lại để quyết định." });
+    return Object.assign(base, { label: FG.behavior(type).label + " · phù hợp hoạt động",
+      detail: "AI phát hiện tín hiệu nhưng phù hợp với hoạt động lớp đang chọn." + (m === 0 ? " Không trừ điểm." : "") });
+  };
+
+  FG.REVIEW = {
+    UNREVIEWED:     { label: "Chưa xem lại", tone: "neutral", icon: "fa-hourglass-half" },
+    CONFIRMED:      { label: "Giáo viên xác nhận đúng", tone: "success", icon: "fa-check" },
+    FALSE_POSITIVE: { label: "Giáo viên xác nhận báo nhầm", tone: "warning", icon: "fa-xmark" },
+    UNCERTAIN:      { label: "Không chắc", tone: "info", icon: "fa-question" },
+  };
+  FG.review = (k) => FG.REVIEW[k] || FG.REVIEW.UNREVIEWED;
+  FG.CONTEXT = {
+    LECTURE: "Nghe giảng", WRITING: "Chép bài / viết", LOOKING_AT_BOARD: "Nhìn bảng", GROUP_DISCUSSION: "Thảo luận nhóm",
+    SELF_STUDY: "Tự học", EXAM: "Kiểm tra", TRANSITION: "Chuyển hoạt động",
+  };
+  FG.contextLabel = (k) => (k ? FG.CONTEXT[k] || k : "Chưa chọn hoạt động");
+  FG.notEnough = (v) => v === "NOT_ENOUGH_DATA";
+  FG.rate = (v) => (v === null || v === undefined ? "—" : FG.notEnough(v) ? "Chưa đủ dữ liệu" : Math.round(v * 100) + "%");
 
   FG.badge = (label, tone, icon) =>
     '<span class="fg-badge" data-tone="' + FG.esc(tone || "neutral") + '">' +
@@ -190,6 +225,33 @@
     region.appendChild(el);
     while (region.children.length > 4) region.firstChild.remove();
     setTimeout(close, timeout || (tone === "danger" ? 8000 : 4500));
+  };
+
+  /* ------------------------------------------------------- class camera */
+  /* Fills a <select> with the cameras a teacher may use for a class (school camera of the class,
+   * personal cameras) and describes the selection. Never shows credentials. */
+  FG.loadClassCamera = async (select, help, classId) => {
+    if (!select) return null;
+    const say = (t) => { if (help) help.textContent = t; };
+    try {
+      const d = await FG.api("/api/teacher/class_camera" + (classId ? "?class_id=" + encodeURIComponent(classId) : ""));
+      const opts = [];
+      if (d.legacy_webcam) opts.push('<option value="">Webcam 0 của máy chủ (mặc định)</option>');
+      else if (d.reason === "CHOOSE") opts.push('<option value="">— Chọn camera —</option>');
+      d.options.forEach((c) => opts.push('<option value="' + FG.esc(c.camera_id) + '">' +
+        FG.esc(c.name + (c.is_shared ? " · camera của lớp" : "") + (c.is_default && !c.is_shared ? " · mặc định" : "")) + "</option>"));
+      select.innerHTML = opts.join("");
+      if (d.selected) select.value = d.selected.camera_id;
+      const describe = () => {
+        const c = d.options.find((o) => o.camera_id === select.value);
+        if (c) say([c.status_label, c.resolution ? String(c.resolution).replace("x", "×") : null,
+                    c.measured_fps ? Math.round(c.measured_fps * 10) / 10 + " FPS" : null].filter(Boolean).join(" · "));
+        else say(d.legacy_webcam ? "Chưa cài camera nào: dùng webcam của máy chủ như trước." : "Hãy chọn camera trước khi bắt đầu.");
+      };
+      select.onchange = describe;
+      describe();
+      return d;
+    } catch (e) { say(e.message); return null; }
   };
 
   /* ------------------------------------------------------------- confirm */
@@ -281,6 +343,17 @@
       if (backdrop) backdrop.addEventListener("click", closeNav);
       document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeNav(); });
     }
+
+    // Modals opened from code: return keyboard focus to the control that opened them
+    // (or, if a re-render removed it, to the page heading) when they close.
+    let opener = null;
+    document.addEventListener("show.bs.modal", () => { opener = document.activeElement; });
+    document.addEventListener("hidden.bs.modal", () => {
+      if (document.querySelector(".modal.show")) return;
+      const target = opener && document.body.contains(opener) ? opener : document.querySelector("h1, .fg-page-title");
+      if (target) { if (!target.hasAttribute("tabindex") && !/^(A|BUTTON|INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) target.setAttribute("tabindex", "-1"); target.focus(); }
+      opener = null;
+    });
 
     FG.$$("[data-fg-datetime]").forEach((el) => { el.textContent = FG.dateTime(el.dataset.fgDatetime); });
     if (window.bootstrap) FG.$$('[data-bs-toggle="tooltip"]').forEach((el) => new window.bootstrap.Tooltip(el));

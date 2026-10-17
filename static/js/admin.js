@@ -199,10 +199,9 @@
 
   /* ─────────────────────────── Đăng ký khuôn mặt ─────────────────────────── */
   const face = {
-    user: null, stream: null, images: [], MAX: 5, MIN: 3, busy: false,
+    user: null, stream: null, images: [], MAX: 5, MIN: 3, busy: false, consentOk: false,
 
     init() {
-      $("faceConsent").addEventListener("change", face.update);
       $("faceStart").addEventListener("click", face.start);
       $("faceCapture").addEventListener("click", face.capture);
       $("faceSave").addEventListener("click", face.save);
@@ -216,11 +215,31 @@
     open(user) {
       face.user = user; face.images = []; face.busy = false;
       $("faceModalTitle").textContent = "Đăng ký khuôn mặt: " + user.display_name;
-      $("faceConsent").checked = false;
+      face.consentOk = false;
       $("faceHint").textContent = "";
-      face.state("fa-video-slash", "Camera chưa bật", "Xác nhận đã có sự đồng ý, sau đó bấm Bật camera.");
+      face.state("fa-hourglass-half", "Đang kiểm tra đồng ý", "Máy chủ kiểm tra bản ghi đồng ý của học sinh này.");
       face.update();
       window.bootstrap.Modal.getOrCreateInstance($("faceModal")).show();
+      face.checkConsent(user);
+    },
+
+    /* Consent comes from the server record; the browser cannot grant it. */
+    async checkConsent(user) {
+      const box = $("faceConsentStatus");
+      box.innerHTML = '<span class="fg-muted">Đang kiểm tra…</span>';
+      try {
+        const res = await FG.api("/api/admin/consent/" + encodeURIComponent(user.id));
+        const c = res.consent;
+        face.consentOk = c.state === "ACTIVE" && !!c.scopes.face_recognition;
+        box.innerHTML = face.consentOk
+          ? FG.badge("Đồng ý nhận diện khuôn mặt: " + c.state_label, "success", "fa-circle-check")
+          : FG.badge(c.state === "ACTIVE" ? "Đồng ý hiện tại không gồm nhận diện khuôn mặt" : c.state_label, "warning", "fa-triangle-exclamation") +
+            '<p class="fg-helper mb-0">Chưa thể đăng ký. Hãy ghi nhận đồng ý của phụ huynh ở trang <a href="/admin/privacy">Dữ liệu &amp; quyền riêng tư</a>.</p>';
+        face.state("fa-video-slash", "Camera chưa bật", face.consentOk ? "Bấm Bật camera để bắt đầu." : "Cần có đồng ý còn hiệu lực trước khi bật camera.");
+      } catch (e) {
+        box.innerHTML = FG.badge("Không kiểm tra được đồng ý", "danger", "fa-triangle-exclamation");
+      }
+      face.update();
     },
 
     state(icon, title, text, spinner) {
@@ -231,7 +250,7 @@
     },
 
     update() {
-      const consent = $("faceConsent").checked, on = !!face.stream;
+      const consent = face.consentOk, on = !!face.stream;
       $("faceStart").disabled = !consent || on;
       $("faceCapture").disabled = !consent || !on || face.busy || face.images.length >= face.MAX;
       if (!FG.isBusy($("faceSave"))) $("faceSave").disabled = !consent || face.images.length < face.MIN;
@@ -301,7 +320,7 @@
 
     async save() {
       const btn = $("faceSave");
-      if (FG.isBusy(btn) || face.images.length < face.MIN || !$("faceConsent").checked) return;
+      if (FG.isBusy(btn) || face.images.length < face.MIN || !face.consentOk) return;
       FG.busy(btn, true, "Đang lưu…");
       try {
         const res = await FG.api("/api/admin/register_face", { body: { user_id: face.user.id, images: face.images.map((i) => i.full) } });

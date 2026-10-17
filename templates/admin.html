@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% set titles = {'accounts': 'Tài khoản', 'classes': 'Lớp học'} %}
+{% set titles = {'accounts': 'Tài khoản', 'classes': 'Lớp học', 'privacy': 'Dữ liệu & quyền riêng tư'} %}
 {% block title %}{{ titles[active_tab] }}{% endblock %}
 {% block page_title %}{{ titles[active_tab] }}{% endblock %}
 
@@ -47,6 +47,67 @@
       <button type="button" class="btn btn-primary" id="classAdd"><i class="fa-solid fa-plus" aria-hidden="true"></i>Thêm lớp</button>
     </div>
     <div class="fg-card-body is-flush" id="classesBody"></div>
+  </section>
+  {% endif %}
+
+  {% if active_tab == 'privacy' %}
+  <section class="fg-card" aria-labelledby="policyTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="policyTitle">{{ policy.title }}</h2>
+        <p class="fg-caption mb-0">Phiên bản chính sách: <span class="fg-num">{{ policy.policy_version }}</span></p>
+      </div>
+      <span class="fg-badge" data-tone="{{ 'warning' if evidence_enabled else 'success' }}"><i class="fa-solid fa-film" aria-hidden="true"></i>Chế độ minh chứng: {{ policy.evidence_state }}</span>
+    </div>
+    <div class="fg-card-body fg-stack" style="gap: var(--fg-3);">
+      <p class="mb-0">{{ policy.summary }}</p>
+      <p class="mb-0"><strong>Khuôn mặt:</strong> {{ policy.face }}</p>
+      <p class="mb-0"><strong>Đoạn minh chứng:</strong> {{ policy.evidence }}</p>
+      <p class="mb-0"><strong>Ai được xem:</strong> {{ policy.access }}</p>
+      <p class="mb-0"><strong>Quyền của học sinh/phụ huynh:</strong> {{ policy.rights }}</p>
+      <div>
+        <p class="fg-card-title mb-1">Thời hạn lưu trữ</p>
+        <ul class="mb-0" id="retentionList">
+          {% for r in policy.retention %}<li><span>{{ r.label }}</span>: <strong>{{ r.value }}</strong> <span class="fg-muted fg-num">({{ r.key }})</span></li>{% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="fg-card-footer fg-row-between">
+      <span>Dữ liệu hết hạn được máy chủ tự xóa định kỳ; mọi lần xóa đều được ghi nhật ký.</span>
+      <button type="button" class="btn btn-secondary btn-sm" id="retentionRun"><i class="fa-solid fa-broom" aria-hidden="true"></i>Dọn dữ liệu hết hạn ngay</button>
+    </div>
+  </section>
+
+  <section class="fg-card" aria-labelledby="privacyStudentsTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="privacyStudentsTitle">Học sinh</h2>
+        <p class="fg-caption mb-0" id="privacySub">Đang tải…</p>
+      </div>
+      <div style="min-width: min(260px, 100%);">
+        <label class="fg-sr-only" for="privacySearch">Tìm học sinh</label>
+        <input type="search" class="form-control" id="privacySearch" placeholder="Tìm theo tên học sinh">
+      </div>
+    </div>
+    <div class="fg-card-body is-flush" id="privacyBody"></div>
+  </section>
+
+  <section class="fg-card" aria-labelledby="auditTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="auditTitle">Nhật ký truy cập và thay đổi</h2>
+        <p class="fg-caption mb-0">Đồng ý, đăng ký/xóa khuôn mặt, xem/xóa minh chứng, xem lại sự kiện, xuất dữ liệu. Không ghi vector khuôn mặt.</p>
+      </div>
+      <div>
+        <label class="fg-sr-only" for="auditAction">Lọc theo thao tác</label>
+        <select class="form-select" id="auditAction">
+          <option value="">Tất cả thao tác</option>
+          {% for key, label in audit_actions or [] %}<option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="fg-card-body is-flush fg-scroll" id="auditBody"></div>
   </section>
   {% endif %}
 </div>
@@ -128,10 +189,7 @@
             <div>Ảnh chụp chỉ dùng để tạo một dãy số đặc trưng giúp camera lớp học nhận ra học sinh. Ảnh không được lưu lại. Dãy số đặc trưng có thể được xóa bất cứ lúc nào ở trang này.</div>
           </div>
         </div>
-        <div class="form-check fg-field">
-          <input class="form-check-input" type="checkbox" id="faceConsent">
-          <label class="form-check-label" for="faceConsent">Học sinh và phụ huynh đã đồng ý cho đăng ký khuôn mặt.</label>
-        </div>
+        <div class="fg-field" id="faceConsentStatus" role="status" aria-live="polite"></div>
         <div class="fg-grid fg-grid-2" style="gap: var(--fg-4);">
           <div>
             <div class="fg-camera" style="aspect-ratio: 4 / 3;">
@@ -191,9 +249,72 @@
   </div>
 </div>
 {% endif %}
+
+{% if active_tab == 'privacy' %}
+<div class="modal fade" id="consentModal" tabindex="-1" aria-labelledby="consentModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <form class="modal-content" id="consentForm" novalidate>
+      <div class="modal-header">
+        <h2 class="modal-title" id="consentModalTitle">Ghi nhận đồng ý</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <div class="fg-banner mb-3" data-tone="danger" id="consentFormError" role="alert" hidden>
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span></span>
+        </div>
+        <div class="fg-banner mb-3" data-tone="info">
+          <i class="fa-solid fa-file-signature" aria-hidden="true"></i>
+          <div>Chỉ ghi nhận khi nhà trường đã nhận được bản đồng ý (giấy hoặc điện tử) của phụ huynh/người giám hộ. Học sinh THCS chưa đủ tuổi: cần thông tin người giám hộ. Phiên bản chính sách: <span class="fg-num">{{ policy.policy_version }}</span>.</div>
+        </div>
+        <div class="form-check fg-field">
+          <input class="form-check-input" type="checkbox" id="cAdult">
+          <label class="form-check-label" for="cAdult">Học sinh đã đủ tuổi tự đồng ý (không cần người giám hộ)</label>
+        </div>
+        <div class="fg-grid fg-grid-2" style="gap: var(--fg-4);" id="cGuardianFields">
+          <div class="fg-field">
+            <label class="form-label fg-required" for="cGuardian">Họ tên phụ huynh / người giám hộ</label>
+            <input type="text" class="form-control" id="cGuardian" maxlength="80" autocomplete="off">
+          </div>
+          <div class="fg-field">
+            <label class="form-label fg-required" for="cRelation">Quan hệ với học sinh</label>
+            <input type="text" class="form-control" id="cRelation" maxlength="80" list="cRelationList" autocomplete="off">
+            <datalist id="cRelationList"><option value="Cha"><option value="Mẹ"><option value="Ông/Bà"><option value="Người giám hộ hợp pháp"></datalist>
+          </div>
+        </div>
+        <fieldset class="fg-field">
+          <legend class="form-label">Phạm vi đồng ý</legend>
+          {% for sc in policy.consent_scopes %}
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="c_{{ sc.key }}" data-scope="{{ sc.key[6:] }}" aria-describedby="c_{{ sc.key }}_help">
+            <label class="form-check-label" for="c_{{ sc.key }}">{{ sc.label }}</label>
+            <div class="fg-helper" id="c_{{ sc.key }}_help">{{ sc.help }}</div>
+          </div>
+          {% endfor %}
+        </fieldset>
+        <div class="fg-grid fg-grid-2" style="gap: var(--fg-4);">
+          <div class="fg-field">
+            <label class="form-label" for="cExpires">Hết hạn</label>
+            <input type="date" class="form-control" id="cExpires" aria-describedby="cExpiresHelp">
+            <div class="fg-helper" id="cExpiresHelp">Để trống: hết hạn sau thời hạn mặc định của nhà trường.</div>
+          </div>
+          <div class="fg-field">
+            <label class="form-label" for="cNote">Ghi chú (số hiệu văn bản đồng ý…)</label>
+            <input type="text" class="form-control" id="cNote" maxlength="200" autocomplete="off">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="submit" class="btn btn-primary" id="consentSave">Ghi nhận đồng ý</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script type="application/json" id="fgBoot">{{ {'page': active_tab}|tojson }}</script>
 <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% if active_tab == 'privacy' %}<script src="{{ url_for('static', filename='js/privacy.js') }}"></script>{% endif %}
 {% endblock %}

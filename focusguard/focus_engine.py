@@ -32,16 +32,20 @@ class FocusEngine:
     def __init__(self, config: FocusConfig = DEFAULT_CONFIG.focus):
         self.config = config
 
-    def rate(self, focus_state: str) -> float:
+    def rate(self, focus_state: str, penalty_multiplier: float = 1.0) -> float:
         if focus_state == rs.FOCUS_FOCUSED:
             return self.config.recovery_per_second
-        return -float(self.config.penalty_per_second.get(focus_state, 0.0))
+        return -float(self.config.penalty_per_second.get(focus_state, 0.0)) * max(0.0, float(penalty_multiplier))
 
-    def advance(self, state: rs.StudentRuntimeState, focus_state: str, now: float) -> Optional[float]:
+    def advance(self, state: rs.StudentRuntimeState, focus_state: str, now: float,
+                penalty_multiplier: float = 1.0) -> Optional[float]:
         """Integrate ``state.focus_score`` over ``[state.last_update_at, now]``.
 
         ``focus_state`` must be the state that was in force during that
         interval (i.e. the state *before* the new observation is applied).
+        ``penalty_multiplier`` comes from the context interpretation policy
+        (focusguard.policies); 1.0 is the legacy behaviour. It only scales
+        penalties, never the recovery rate.
         """
         c = self.config
         last = state.last_update_at
@@ -54,7 +58,7 @@ class FocusEngine:
             return state.focus_score
 
         before = state.focus_score
-        after = max(c.min_score, min(c.max_score, before + self.rate(focus_state) * dt))
+        after = max(c.min_score, min(c.max_score, before + self.rate(focus_state, penalty_multiplier) * dt))
         state.focus_score = after
 
         if focus_state != rs.FOCUS_TEMPORARILY_NOT_VISIBLE:

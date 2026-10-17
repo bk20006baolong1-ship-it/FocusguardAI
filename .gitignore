@@ -16,6 +16,8 @@ node_modules/
 .env
 .env.*
 !.env.example
+# development-only camera credential key (focusguard/cameras/crypto.py)
+.focusguard/
 *.pem
 *.key
 *.p12
@@ -45,3 +47,9 @@ recordings/
 # Private evaluation data (labelled real-world footage/annotations)
 evaluation/private/
 evaluation/datasets/
+
+# Event evidence clips (Evidence Mode) and other server-side instance data
+instance/
+*.fgev
+# Generated evaluation / benchmark / calibration reports (CI uploads them as artifacts)
+evaluation/reports/

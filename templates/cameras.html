@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}Camera{% endblock %}
+{% block page_title %}Cài đặt › Camera{% endblock %}
+
+{% block content %}
+<div id="camerasPage" class="fg-stack" data-admin="{{ 'true' if is_admin else 'false' }}">
+
+  <div class="fg-banner" data-tone="info" role="note">
+    <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+    <div>
+      <div class="fg-banner-title">Camera trong mạng LAN của trường</div>
+      <div>FocusGuard chỉ kết nối tới camera cùng mạng nội bộ. Mật khẩu / mã xác minh được mã hóa trên máy chủ và không bao giờ hiện lại. Xem thử camera không bật phân tích và không tạo sự kiện.</div>
+    </div>
+  </div>
+
+  {# ───────────────────────────── Thêm camera ───────────────────────────── #}
+  <section class="fg-card" aria-labelledby="addCamTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="addCamTitle">Thêm camera</h2>
+        <p class="fg-caption mb-0">{% if is_admin %}Camera thêm ở đây là camera của trường, có thể gán cho lớp học.{% else %}Camera của bạn, dùng khi bắt đầu buổi học bằng camera lớp học.{% endif %}</p>
+      </div>
+    </div>
+    <div class="fg-card-body">
+      <div class="fg-row fg-cam-add-actions">
+        <button type="button" class="btn btn-primary" id="camDiscover"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>Tìm camera trong mạng LAN</button>
+        <button type="button" class="btn btn-secondary" id="camManual"><i class="fa-solid fa-keyboard" aria-hidden="true"></i>Thêm camera thủ công</button>
+        <button type="button" class="btn btn-secondary" id="camWebcam"><i class="fa-solid fa-laptop" aria-hidden="true"></i>Dùng webcam của máy chủ</button>
+      </div>
+
+      <div id="discoveryPanel" class="fg-cam-discovery" hidden>
+        <div class="fg-row-between">
+          <p class="mb-0 fg-cam-discovery-status" id="discoveryStatus" role="status" aria-live="polite"></p>
+          <div class="fg-row">
+            <button type="button" class="btn btn-secondary btn-sm" id="discoveryStop" hidden><i class="fa-solid fa-stop" aria-hidden="true"></i>Dừng tìm</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="discoveryRefresh" hidden><i class="fa-solid fa-rotate-right" aria-hidden="true"></i>Tìm lại</button>
+          </div>
+        </div>
+        <div id="discoveryResults" class="fg-cam-grid" aria-label="Camera tìm thấy"></div>
+        <p class="fg-caption mb-0 mt-2">Không thấy camera? Kiểm tra camera và máy tính dùng chung mạng Wi-Fi/router, hoặc dùng <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="camManual2">Thêm camera thủ công</button>.</p>
+      </div>
+    </div>
+  </section>
+
+  {% if not is_admin %}
+  <section class="fg-card" aria-labelledby="myCamTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="myCamTitle">Camera của tôi</h2>
+        <p class="fg-caption mb-0">Camera mặc định được dùng khi lớp chưa được gán camera của trường.</p>
+      </div>
+    </div>
+    <div class="fg-card-body" id="myCamerasBody"></div>
+  </section>
+  {% endif %}
+
+  <section class="fg-card" aria-labelledby="classCamTitle">
+    <div class="fg-card-header">
+      <div>
+        <h2 class="fg-card-title" id="classCamTitle">Camera lớp học</h2>
+        <p class="fg-caption mb-0">{% if is_admin %}Camera của trường. Gán camera cho lớp để giáo viên không phải cài đặt lại.{% else %}Camera của trường được quản trị viên gán cho lớp của bạn (chỉ xem, không sửa xác thực).{% endif %}</p>
+      </div>
+    </div>
+    <div class="fg-card-body" id="classCamerasBody"></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block modals %}
+{# ───────────────────── Kết nối / kiểm tra / xem trước / lưu ───────────────────── #}
+<div class="modal fade" id="connectModal" tabindex="-1" aria-labelledby="connectTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <form class="modal-content" id="connectForm" novalidate autocomplete="off">
+      <div class="modal-header">
+        <h2 class="modal-title" id="connectTitle">Kết nối camera</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <p class="fg-caption" id="connectDevice"></p>
+        <div class="fg-banner mb-3" data-tone="danger" id="connectError" role="alert" hidden>
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span></span>
+        </div>
+        <div class="fg-grid fg-grid-2 fg-cam-form">
+          <div class="fg-field" id="camNameField">
+            <label class="form-label fg-required" for="camName">Tên camera</label>
+            <input type="text" class="form-control" id="camName" maxlength="60" placeholder="Ví dụ: Phòng 8/1 – camera trước" aria-describedby="camNameError">
+            <div class="fg-error-text" id="camNameError" hidden>Hãy đặt tên cho camera.</div>
+          </div>
+          <div class="fg-field" id="camUserField">
+            <label class="form-label" for="camUser">Tên đăng nhập camera</label>
+            <input type="text" class="form-control" id="camUser" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="camUserHelp">
+            <div class="fg-helper" id="camUserHelp">Camera EZVIZ: thường là <strong>admin</strong>.</div>
+          </div>
+          <div class="fg-field" id="camSecretField">
+            <label class="form-label" for="camSecret">Mật khẩu / mã xác minh</label>
+            <div class="fg-input-group">
+              <input type="password" class="form-control" id="camSecret" maxlength="128" autocomplete="new-password" aria-describedby="camSecretHelp">
+              <button type="button" class="fg-icon-btn" id="camSecretToggle" aria-label="Hiện mật khẩu" aria-pressed="false"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
+            </div>
+            <div class="fg-helper" id="camSecretHelp">EZVIZ: mã xác minh (verification code) 6 chữ in hoa trên nhãn dưới đáy camera. Được mã hóa khi lưu, không hiện lại.</div>
+          </div>
+          <div class="fg-field" id="camWebcamField" hidden>
+            <label class="form-label" for="camIndex">Webcam số</label>
+            <select class="form-select" id="camIndex" aria-describedby="camIndexHelp">
+              <option value="0">0 (webcam mặc định)</option><option value="1">1</option><option value="2">2</option><option value="3">3</option>
+            </select>
+            <div class="fg-helper" id="camIndexHelp">Webcam cắm vào máy đang chạy FocusGuard.</div>
+          </div>
+        </div>
+
+        <details class="fg-cam-advanced" id="camAdvanced">
+          <summary>Nâng cao (chỉ khi tự dò không được)</summary>
+          <div class="fg-grid fg-grid-2 fg-cam-form mt-3">
+            <div class="fg-field">
+              <label class="form-label" for="camHost">Địa chỉ IP camera</label>
+              <input type="text" class="form-control" id="camHost" maxlength="253" inputmode="url" placeholder="192.168.1.20" autocapitalize="none" spellcheck="false" aria-describedby="camHostHelp">
+              <div class="fg-helper" id="camHostHelp">Chỉ địa chỉ trong mạng LAN (192.168.x.x, 10.x.x.x, 172.16–31.x.x).</div>
+            </div>
+            <div class="fg-field">
+              <label class="form-label" for="camProtocol">Giao thức</label>
+              <select class="form-select" id="camProtocol">
+                <option value="AUTO">Tự động</option><option value="RTSP">RTSP</option><option value="ONVIF">ONVIF</option>
+              </select>
+            </div>
+            <div class="fg-field">
+              <label class="form-label" for="camPort">Cổng RTSP</label>
+              <input type="number" class="form-control" id="camPort" min="1" max="65535" placeholder="554">
+            </div>
+            <div class="fg-field">
+              <label class="form-label" for="camPath">Đường dẫn luồng</label>
+              <input type="text" class="form-control" id="camPath" maxlength="200" placeholder="/H.264" autocapitalize="none" spellcheck="false">
+            </div>
+            <div class="fg-field">
+              <label class="form-label" for="camProfile">Profile ONVIF</label>
+              <input type="text" class="form-control" id="camProfile" maxlength="64" placeholder="Để trống: chọn tự động">
+            </div>
+            <div class="fg-field">
+              <label class="form-label" for="camUrl">Hoặc dán đường dẫn RTSP</label>
+              <input type="text" class="form-control" id="camUrl" maxlength="500" placeholder="rtsp://192.168.1.20:554/H.264" autocapitalize="none" spellcheck="false" aria-describedby="camUrlHelp">
+              <div class="fg-helper" id="camUrlHelp">Nếu đường dẫn có tên/mật khẩu, máy chủ tách và mã hóa mật khẩu; đường dẫn gốc không được lưu.</div>
+            </div>
+          </div>
+        </details>
+
+        <div class="form-check fg-field mt-3" id="camDefaultField">
+          <input class="form-check-input" type="checkbox" id="camDefault">
+          <label class="form-check-label" for="camDefault">Đặt làm camera mặc định</label>
+        </div>
+
+        <div class="fg-cam-result" id="camResult" role="status" aria-live="polite"></div>
+        <div class="fg-cam-preview" id="camPreviewBox" hidden>
+          <img id="camPreviewImg" alt="Hình xem trước từ camera">
+          <p class="fg-caption mb-0" id="camPreviewInfo" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+      <div class="modal-footer fg-cam-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-secondary" id="camTest"><i class="fa-solid fa-plug" aria-hidden="true"></i>Kiểm tra kết nối</button>
+        <button type="button" class="btn btn-secondary" id="camPreview" disabled><i class="fa-solid fa-eye" aria-hidden="true"></i>Xem trước</button>
+        <button type="submit" class="btn btn-primary" id="camSave" disabled><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>Lưu camera</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal fade" id="renameModal" tabindex="-1" aria-labelledby="renameTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" id="renameForm" novalidate>
+      <div class="modal-header">
+        <h2 class="modal-title" id="renameTitle">Đổi tên camera</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <div class="fg-field mb-0">
+          <label class="form-label fg-required" for="renameInput">Tên mới</label>
+          <input type="text" class="form-control" id="renameInput" maxlength="60" aria-describedby="renameError">
+          <div class="fg-error-text" id="renameError" hidden>Hãy nhập tên camera.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="submit" class="btn btn-primary" id="renameSave">Lưu tên</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal fade" id="assignModal" tabindex="-1" aria-labelledby="assignTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" id="assignForm" novalidate>
+      <div class="modal-header">
+        <h2 class="modal-title" id="assignTitle">Gán camera cho lớp</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <p class="fg-caption" id="assignCurrent"></p>
+        <div class="fg-field mb-0">
+          <label class="form-label" for="assignClass">Lớp</label>
+          <select class="form-select" id="assignClass" aria-describedby="assignHelp">
+            {% for c in classes %}<option value="{{ c.id }}">{{ c.class_name }}</option>{% endfor %}
+          </select>
+          <div class="fg-helper" id="assignHelp">Mỗi lớp dùng một camera; gán camera này sẽ thay camera cũ của lớp.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-secondary" id="assignRemove">Bỏ gán lớp này</button>
+        <button type="submit" class="btn btn-primary" id="assignSave">Gán lớp</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal fade" id="previewModal" tabindex="-1" aria-labelledby="previewTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title" id="previewTitle">Xem thử camera</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+      </div>
+      <div class="modal-body">
+        <div class="fg-cam-preview">
+          <img id="previewImg" alt="Hình xem thử từ camera">
+          <p class="fg-caption mb-0" id="previewInfo" role="status" aria-live="polite">Đang kết nối…</p>
+        </div>
+        <p class="fg-caption mt-2 mb-0">Xem thử tối đa 60 giây. Không phân tích, không tạo sự kiện, không lưu hình.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="previewStop"><i class="fa-solid fa-plug-circle-xmark" aria-hidden="true"></i>Ngắt kết nối</button>
+        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/cameras.js') }}"></script>{% endblock %}

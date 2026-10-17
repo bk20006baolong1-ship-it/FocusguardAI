@@ -17,9 +17,11 @@ Chuẩn bị: `cp .env.example .env`, điền `FLASK_SECRET_KEY`, `DEMO_ACCOUNT_
 3. Chớp mắt / liếc nhanh / giơ điện thoại 0.2 s → **không** cảnh báo.
 4. Cầm điện thoại > 1 s → mục **Cần chú ý ngay** hiện "Tên học sinh · Dùng điện thoại · N giây" kèm gợi ý xử lý,
    điểm giảm 2 điểm/giây; cất đi → hồi 0.5 điểm/giây. Bấm vào dòng đó để mở chi tiết học sinh.
-5. Hai học sinh đi cắt ngang nhau → danh tính không bị đổi chéo.
+5. Hai học sinh đi cắt ngang nhau → kỳ vọng: danh tính không bị đổi chéo (đã kiểm chứng trên dữ liệu SYNTHETIC;
+   trên camera thật: chưa đo — kịch bản 08 của công cụ thực địa).
 6. Một học sinh rời khung hình 3 s → "Tạm khuất" (không trừ điểm); > 10 s → "Rời chỗ" (đếm 1 lần).
-7. Người lạ vào khung hình → giữ "Track n: UNKNOWN", không bị gán vào học sinh nào.
+7. Người lạ vào khung hình → kỳ vọng: giữ "Track n: UNKNOWN", không bị gán vào học sinh nào (SYNTHETIC: đạt; camera
+   thật: chưa đo — kịch bản 09).
 
 ## 3. Kết thúc & báo cáo (1 phút)
 Bấm **Kết thúc buổi học** → hộp xác nhận nêu hậu quả → bảng **Tổng kết buổi học** từ `session_students`: có mặt x/y,

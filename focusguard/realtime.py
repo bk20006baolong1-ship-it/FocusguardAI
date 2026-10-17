@@ -44,5 +44,8 @@ def student_self_view(view: dict) -> dict:
             "attendance_status", "visibility_status", "connection_status",
             "identity_status", "event_counts", "distractions", "away_count",
             "away_seconds", "visible_seconds", "active_behaviors", "labels", "state",
-            "attendance", "checkin_offset_seconds")
+            "attendance", "checkin_offset_seconds",
+            # the student's own signals with the class-activity interpretation, so a
+            # parent/student sees "phù hợp hoạt động" exactly like the teacher does
+            "behaviors", "interpretation")
     return {k: view.get(k) for k in keep}

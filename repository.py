@@ -12,6 +12,10 @@ Normalized model:
                      start/end, duration, confidence, source, metadata
     focus_snapshots  periodic focus score samples
 
+BTC-feedback tables (focusguard/repo_extensions.py, same schema on both
+backends): consents, audit_log, event_reviews, evidence_clips,
+evaluation_sessions, evaluation_annotations, context_segments.
+
 Analytics never read ``history_json``; they are computed by
 ``focusguard.analytics`` from the tables above. No synthetic sessions are
 seeded here. Only non-production environments seed demo *accounts*.
@@ -23,6 +27,8 @@ import threading
 import time
 from datetime import datetime
 
+from focusguard.repo_extensions import (FOCUS_EVENT_EXTRA, DomainTablesMixin, FirestoreTablesMixin,
+                                       SQLiteTablesMixin)
 from focusguard.security import env_value, hash_password, is_hashed, verify_password
 
 
@@ -86,6 +92,24 @@ def _json_or_empty(raw):
         return {}
 
 
+def _gallery_rows(repo, users):
+    """[{student_id, full_name, username, embeddings: [...], embedding: first}] for students with face data
+    (active templates; a not-yet-migrated legacy embedding as fallback)."""
+    out = []
+    for u in users:
+        embs = [r["embedding"] for r in repo.list_face_templates(u["id"]) if r.get("embedding")]
+        if not embs and u.get("face_embedding"):
+            try:
+                legacy = u["face_embedding"]
+                embs = [json.loads(legacy) if isinstance(legacy, str) else list(legacy)]
+            except (TypeError, ValueError):
+                embs = []
+        if embs:
+            out.append({"student_id": u["id"], "full_name": u.get("display_name"), "username": u.get("username"),
+                        "embedding": embs[0], "embeddings": embs})
+    return out
+
+
 class BaseRepository:
     """Interface shared by both backends (see SQLiteRepository for semantics)."""
 
@@ -93,7 +117,7 @@ class BaseRepository:
 # =============================================================================
 # SQLite
 # =============================================================================
-class SQLiteRepository(BaseRepository):
+class SQLiteRepository(DomainTablesMixin, SQLiteTablesMixin, BaseRepository):
     def __init__(self, db_path=None):
         self.db_path = db_path or os.environ.get("SQLITE_PATH", "focusguard.db")
         self._lock = threading.RLock()
@@ -131,6 +155,8 @@ class SQLiteRepository(BaseRepository):
                     result = [dict(r) for r in cur.fetchall()]
                 elif fetch == "lastrowid":
                     result = cur.lastrowid
+                elif fetch == "rowcount":
+                    result = cur.rowcount
                 conn.commit()
                 return result
             finally:
@@ -232,6 +258,7 @@ class SQLiteRepository(BaseRepository):
         self._ensure_column("sessions", "source", "TEXT")
         self._ensure_column("class_sessions", "mode", "TEXT")
         self._ensure_column("class_sessions", "started_by", "INTEGER")
+        self._ensure_column("session_students", "attendance_source", "TEXT")
         for col, decl in (("student_id", "INTEGER"), ("class_session_id", "INTEGER"), ("class_id", "INTEGER"),
                           ("start_time", "REAL"), ("end_time", "REAL"), ("duration_seconds", "REAL"),
                           ("confidence", "REAL"), ("source", "TEXT"), ("metadata_json", "TEXT")):
@@ -244,6 +271,8 @@ class SQLiteRepository(BaseRepository):
             "CREATE INDEX IF NOT EXISTS ix_ss_cs ON session_students(class_session_id)",
         ):
             self._execute(idx)
+        self._init_extension_tables()
+        self.migrate_legacy_face_embeddings()
 
         self._migrate_class_members()
         self.migrate_plaintext_passwords()
@@ -341,12 +370,14 @@ class SQLiteRepository(BaseRepository):
     def get_users_list(self):
         rows = self._execute("""
             SELECT u.id, u.username, u.display_name, u.role, c.class_name, u.class_id, u.student_id,
-                   u.face_embedding IS NOT NULL AND u.face_embedding != '' AS has_face
+                   (u.face_embedding IS NOT NULL AND u.face_embedding != '') OR EXISTS (
+                       SELECT 1 FROM face_profiles fp WHERE fp.student_id = u.id AND fp.active = 1) AS has_face,
+                   u.face_enrolled_at
             FROM users u LEFT JOIN classes c ON u.class_id = c.id
             ORDER BY u.role, u.display_name""", fetch="all")
         return [{"id": r["id"], "username": r["username"], "display_name": r["display_name"], "role": r["role"],
                  "class_name": r["class_name"] or "N/A", "class_id": r["class_id"], "student_id": r["student_id"],
-                 "has_face": bool(r["has_face"])} for r in rows]
+                 "has_face": bool(r["has_face"]), "face_enrolled_at": r["face_enrolled_at"]} for r in rows]
 
     def create_user(self, username, password, display_name, role, class_id, student_id=None):
         if role not in VALID_ROLES:
@@ -429,23 +460,72 @@ class SQLiteRepository(BaseRepository):
         return [{"student_id": r["id"], "username": r["username"], "display_name": r["display_name"],
                  "class_id": r["class_id"], "roll": r["roll"]} for r in rows]
 
+    # Face data lives in face_profiles (multi-template, focusguard/face_profiles.py). users.face_embedding
+    # is the legacy single embedding: migrated into face_profiles at start-up (source LEGACY) and only
+    # ever cleared afterwards. users.face_enrolled_at = first enrollment (retention clock).
     def save_face_embedding(self, user_id, embedding_json):
-        self._execute("UPDATE users SET face_embedding = ? WHERE id = ? AND role = 'student'", (embedding_json, user_id))
+        """Legacy API: an embedding replaces every template with one ADMIN_ENROLLMENT template;
+        None deletes ALL face data of the user (templates + legacy column)."""
+        row = self._execute("SELECT role FROM users WHERE id = ?", (user_id,), fetch="one")
+        if not row or (embedding_json and row["role"] != "student"):
+            return False          # same contract as Firestore: only students get face data; clearing is always allowed
+        self.delete_face_templates(int(user_id))
+        if embedding_json:
+            self.add_face_template({"student_id": int(user_id), "embedding": json.loads(embedding_json),
+                                    "source": "ADMIN_ENROLLMENT"})
+        self._execute("UPDATE users SET face_embedding = NULL, face_enrolled_at = ? WHERE id = ?",
+                      (time.time() if embedding_json else None, user_id))
         return True
+
+    def mark_face_enrolled(self, user_id, at=None):
+        """First enrollment time (retention clock); never moved forward by later samples."""
+        self._execute("UPDATE users SET face_enrolled_at = ? WHERE id = ? AND role = 'student' "
+                      "AND face_enrolled_at IS NULL", (at if at is not None else time.time(), user_id))
+
+    def _legacy_faces(self):
+        rows = self._execute("SELECT id, face_embedding, face_enrolled_at FROM users WHERE role = 'student' "
+                             "AND face_embedding IS NOT NULL AND face_embedding != ''", fetch="all")
+        return [{"id": r["id"], "face_embedding": r["face_embedding"], "face_enrolled_at": r["face_enrolled_at"]}
+                for r in rows]
+
+    def migrate_legacy_face_embeddings(self):
+        """users.face_embedding -> one LEGACY face_profiles template (idempotent, nothing lost)."""
+        n = 0
+        for r in self._legacy_faces():
+            try:
+                emb = json.loads(r["face_embedding"])
+            except (TypeError, ValueError):
+                continue
+            at = r["face_enrolled_at"] if r["face_enrolled_at"] is not None else time.time()
+            if not self.list_face_templates(r["id"]):
+                self.add_face_template({"student_id": r["id"], "embedding": emb, "source": "LEGACY",
+                                        "created_at": at})
+            self._execute("UPDATE users SET face_embedding = NULL, face_enrolled_at = ? WHERE id = ?", (at, r["id"]))
+            n += 1
+        return n
+
+    def get_face_enrollment(self, user_id):
+        """Whether face data exists, how many templates and when it was enrolled. Never returns a vector."""
+        row = self._execute("SELECT face_embedding IS NOT NULL AND face_embedding != '' AS has_legacy, face_enrolled_at "
+                            "FROM users WHERE id = ?", (user_id,), fetch="one")
+        if not row:
+            return {"has_face": False, "enrolled_at": None, "template_count": 0}
+        n = len(self.list_face_templates(int(user_id)))
+        return {"has_face": bool(row["has_legacy"]) or n > 0, "enrolled_at": row["face_enrolled_at"],
+                "template_count": n}
+
+    def get_students_with_face(self, before=None):
+        counts = self.face_template_counts()
+        rows = self._execute("SELECT id, face_enrolled_at, face_embedding IS NOT NULL AND face_embedding != '' "
+                             "AS has_legacy FROM users WHERE role = 'student'", fetch="all")
+        return [{"student_id": r["id"], "enrolled_at": r["face_enrolled_at"]} for r in rows
+                if (r["has_legacy"] or counts.get(r["id"]))
+                and (before is None or (r["face_enrolled_at"] is not None and r["face_enrolled_at"] < before))]
 
     def get_student_embeddings_by_class(self, class_id):
         rows = self._execute("""SELECT id, display_name, username, face_embedding FROM users
                                 WHERE role = 'student' AND class_id = ?""", (class_id,), fetch="all")
-        out = []
-        for r in rows:
-            if not r["face_embedding"]:
-                continue
-            try:
-                out.append({"student_id": r["id"], "full_name": r["display_name"], "username": r["username"],
-                            "embedding": json.loads(r["face_embedding"])})
-            except (TypeError, ValueError):
-                continue
-        return out
+        return _gallery_rows(self, [dict(r) for r in rows])
 
     # ------------------------------------------------------ personal sessions
     def create_session(self, user_id, start_time, subject=None, class_session_id=None, source="personal_camera"):
@@ -496,13 +576,28 @@ class SQLiteRepository(BaseRepository):
     def save_session_student(self, row):
         self._execute("""INSERT INTO session_students (class_session_id, session_id, class_id, student_id,
                          attendance_status, first_seen_at, last_seen_at, visible_seconds, away_count, away_seconds,
-                         final_focus_score, avg_focus_score, measured_seconds, identity_confidence, event_counts_json)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                         final_focus_score, avg_focus_score, measured_seconds, identity_confidence, event_counts_json,
+                         attendance_source)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                       (row.get("class_session_id"), row.get("session_id"), row.get("class_id"), row["student_id"],
                        row.get("attendance_status"), row.get("first_seen_at"), row.get("last_seen_at"),
                        row.get("visible_seconds"), row.get("away_count"), row.get("away_seconds"),
                        row.get("final_focus_score"), row.get("avg_focus_score"), row.get("measured_seconds"),
-                       row.get("identity_confidence"), json.dumps(row.get("event_counts") or {})))
+                       row.get("identity_confidence"), json.dumps(row.get("event_counts") or {}),
+                       row.get("attendance_source")))
+        return True
+
+    def update_session_student_attendance(self, class_session_id, student_id, status, source):
+        """Teacher correction of a finished session's attendance (the only field that changes)."""
+        with self._lock:       # update-or-insert is one step for concurrent corrections
+            cur = self._execute("UPDATE session_students SET attendance_status = ?, attendance_source = ? "
+                                "WHERE class_session_id = ? AND student_id = ?",
+                                (status, source, int(class_session_id), int(student_id)), fetch="rowcount")
+            if not cur:        # no row (session ended abnormally / student added later): create it
+                cs = self.get_class_session(class_session_id) or {}
+                self.save_session_student({"class_session_id": int(class_session_id), "class_id": cs.get("class_id"),
+                                           "student_id": int(student_id), "attendance_status": status,
+                                           "attendance_source": source})
         return True
 
     def get_session_students(self, class_session_id=None, student_id=None, class_id=None):
@@ -521,15 +616,23 @@ class SQLiteRepository(BaseRepository):
 
     # ----------------------------------------------------------- focus events
     def create_focus_event(self, row):
+        """Insert one raw AI episode. Returns its id. Never updated afterwards."""
         start = row.get("start_time")
-        self._execute("""INSERT INTO focus_events (session_id, type, timestamp, student_id, class_session_id, class_id,
-                         start_time, end_time, duration_seconds, confidence, source, metadata_json)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                      (row.get("session_id"), row["type"], _now_str(start), row.get("student_id"),
-                       row.get("class_session_id"), row.get("class_id"), start, row.get("end_time"),
-                       row.get("duration_seconds"), row.get("confidence"), row.get("source"),
-                       json.dumps(row.get("metadata") or {}, default=str)))
-        return True
+        extra = [c for c, _ in FOCUS_EVENT_EXTRA]
+        return self._execute(f"""INSERT INTO focus_events (session_id, type, timestamp, student_id, class_session_id, class_id,
+                         start_time, end_time, duration_seconds, confidence, source, metadata_json, {", ".join(extra)})
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{", ?" * len(extra)})""",
+                             (row.get("session_id"), row["type"], _now_str(start), row.get("student_id"),
+                              row.get("class_session_id"), row.get("class_id"), start, row.get("end_time"),
+                              row.get("duration_seconds"), row.get("confidence"), row.get("source"),
+                              json.dumps(row.get("metadata") or {}, default=str)) + tuple(row.get(c) for c in extra),
+                             fetch="lastrowid")
+
+    def get_focus_event(self, event_id):
+        r = self._execute("SELECT * FROM focus_events WHERE id = ?", (event_id,), fetch="one")
+        if r:
+            r["metadata"] = _json_or_empty(r.pop("metadata_json", None))
+        return r
 
     def get_focus_events(self, student_id=None, session_id=None, class_session_id=None, class_id=None):
         where, params = [], []
@@ -566,7 +669,7 @@ class SQLiteRepository(BaseRepository):
 # =============================================================================
 # Firestore (server-side only; firestore.rules deny all direct client access)
 # =============================================================================
-class FirestoreRepository(BaseRepository):
+class FirestoreRepository(DomainTablesMixin, FirestoreTablesMixin, BaseRepository):
     def __init__(self, client=None):
         self.db = client
         if self.db is None:
@@ -622,6 +725,7 @@ class FirestoreRepository(BaseRepository):
     # --------------------------------------------------------------- schema
     def init_db(self, seed_demo_accounts=False, demo_password=None):
         self.migrate_plaintext_passwords()
+        self.migrate_legacy_face_embeddings()
         if seed_demo_accounts:
             self.seed_demo_accounts(demo_password or env_value(os.environ, "DEMO_ACCOUNT_PASSWORD") or "123")
 
@@ -718,12 +822,14 @@ class FirestoreRepository(BaseRepository):
 
     def get_users_list(self):
         names = {c["id"]: c.get("class_name") for c in self._docs("classes") if "id" in c}
+        templates = self.face_template_counts()
         users = []
         for d in self._docs("users"):
             users.append({"id": d.get("id"), "username": d.get("username"), "display_name": d.get("display_name"),
                           "role": d.get("role"), "class_name": names.get(d.get("class_id"), "N/A"),
                           "class_id": d.get("class_id"), "student_id": d.get("student_id"),
-                          "has_face": bool(d.get("face_embedding"))})
+                          "has_face": bool(d.get("face_embedding")) or bool(templates.get(d.get("id"))),
+                          "face_enrolled_at": d.get("face_enrolled_at")})
         return sorted(users, key=lambda u: (u["role"] or "", u["display_name"] or ""))
 
     def create_user(self, username, password, display_name, role, class_id, student_id=None):
@@ -804,26 +910,64 @@ class FirestoreRepository(BaseRepository):
         return sorted(out, key=lambda s: s["display_name"] or "")
 
     def save_face_embedding(self, user_id, embedding_json):
+        """Legacy API (see SQLiteRepository.save_face_embedding)."""
         ref = self._col("users").document(str(user_id))
         doc = ref.get()
-        if not doc.exists or (doc.to_dict() or {}).get("role") != "student":
-            return False
-        ref.update({"face_embedding": embedding_json})
+        if not doc.exists or (embedding_json and (doc.to_dict() or {}).get("role") != "student"):
+            return False          # only students get face data; clearing is always allowed
+        self.delete_face_templates(int(user_id))
+        if embedding_json:
+            self.add_face_template({"student_id": int(user_id), "embedding": json.loads(embedding_json),
+                                    "source": "ADMIN_ENROLLMENT"})
+        ref.update({"face_embedding": None, "face_enrolled_at": time.time() if embedding_json else None})
         return True
 
-    def get_student_embeddings_by_class(self, class_id):
-        out = []
-        for d in self._docs("users", role="student", class_id=int(class_id)):
+    def mark_face_enrolled(self, user_id, at=None):
+        ref = self._col("users").document(str(user_id))
+        doc = ref.get()
+        d = doc.to_dict() or {} if doc.exists else {}
+        if doc.exists and d.get("role") == "student" and d.get("face_enrolled_at") is None:
+            ref.update({"face_enrolled_at": at if at is not None else time.time()})
+
+    def migrate_legacy_face_embeddings(self):
+        n = 0
+        for d in self._docs("users", role="student"):
             emb = d.get("face_embedding")
             if not emb:
                 continue
             try:
-                out.append({"student_id": d.get("id"), "full_name": d.get("display_name"),
-                            "username": d.get("username"),
-                            "embedding": json.loads(emb) if isinstance(emb, str) else emb})
+                vec = json.loads(emb) if isinstance(emb, str) else list(emb)
             except (TypeError, ValueError):
                 continue
+            at = d.get("face_enrolled_at") if d.get("face_enrolled_at") is not None else time.time()
+            if not self.list_face_templates(d.get("id")):
+                self.add_face_template({"student_id": d.get("id"), "embedding": vec, "source": "LEGACY",
+                                        "created_at": at})
+            self._col("users").document(str(d.get("id"))).update({"face_embedding": None, "face_enrolled_at": at})
+            n += 1
+        return n
+
+    def get_face_enrollment(self, user_id):
+        d = self._user_doc(user_id) or {}
+        n = len(self.list_face_templates(int(user_id))) if d else 0
+        return {"has_face": bool(d.get("face_embedding")) or n > 0, "enrolled_at": d.get("face_enrolled_at"),
+                "template_count": n}
+
+    def get_students_with_face(self, before=None):
+        counts = self.face_template_counts()
+        out = []
+        for d in self._docs("users", role="student"):
+            if not (d.get("face_embedding") or counts.get(d.get("id"))):
+                continue
+            at = d.get("face_enrolled_at")
+            if before is None or (at is not None and at < before):
+                out.append({"student_id": d.get("id"), "enrolled_at": at})
         return out
+
+    def get_student_embeddings_by_class(self, class_id):
+        return _gallery_rows(self, [{"id": d.get("id"), "display_name": d.get("display_name"),
+                                     "username": d.get("username"), "face_embedding": d.get("face_embedding")}
+                                    for d in self._docs("users", role="student", class_id=int(class_id))])
 
     # ------------------------------------------------------ personal sessions
     def create_session(self, user_id, start_time, subject=None, class_session_id=None, source="personal_camera"):
@@ -879,12 +1023,37 @@ class FirestoreRepository(BaseRepository):
         return self._docs("session_students", class_session_id=class_session_id,
                           student_id=student_id, class_id=class_id)
 
+    def update_session_student_attendance(self, class_session_id, student_id, status, source):
+        q = self._col("session_students").where("class_session_id", "==", int(class_session_id)) \
+            .where("student_id", "==", int(student_id))
+        found = False
+        for d in q.stream():
+            d.reference.update({"attendance_status": status, "attendance_source": source})
+            found = True
+        if not found:          # no row (session ended abnormally / student added later): create it
+            # deterministic document id: two concurrent corrections write the same document
+            cs = self.get_class_session(class_session_id) or {}
+            doc_id = f"att-{int(class_session_id)}-{int(student_id)}"
+            self._col("session_students").document(doc_id).set(
+                {"id": doc_id, "class_session_id": int(class_session_id), "session_id": None,
+                 "class_id": cs.get("class_id"), "student_id": int(student_id), "attendance_status": status,
+                 "attendance_source": source, "event_counts": {}}, merge=True)
+        return True
+
     # -------------------------------------------------- events and snapshots
     def create_focus_event(self, row):
         data = dict(row)
         data["timestamp"] = _now_str(row.get("start_time"))
-        self._add("focus_events", data)
-        return True
+        for c, _ in FOCUS_EVENT_EXTRA:
+            data.setdefault(c, None)
+        return self._add("focus_events", data)
+
+    def get_focus_event(self, event_id):
+        try:
+            doc = self._col("focus_events").document(str(int(event_id))).get()
+        except (TypeError, ValueError):
+            return None
+        return doc.to_dict() if doc.exists else None
 
     def get_focus_events(self, student_id=None, session_id=None, class_session_id=None, class_id=None):
         return self._docs("focus_events", student_id=student_id, session_id=session_id,

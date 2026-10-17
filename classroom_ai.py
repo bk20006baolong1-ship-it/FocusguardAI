@@ -19,9 +19,12 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 from face_recognition import FaceRecognizer
+from focusguard.cameras.reader import LatestFrameReader
+from focusguard.cameras.sources import WebcamSource
 from focusguard.association import associate_faces, associate_phones
 from focusguard.behavior import Observation
-from focusguard.identity import CONFIRMED, IdentityManager
+from focusguard.classroom_identity import ClassroomIdentity, FaceObs
+from focusguard.identity import CONFIRMED
 from focusguard.vision_metrics import mean_ear
 from focusguard import runtime_state as rs
 from seating_manager import SeatingManager
@@ -37,41 +40,17 @@ LANDMARK_INTERVAL = 0.3      # seconds between MediaPipe runs per track
 LANDMARK_MAX_AGE = 0.6       # cached EAR/pose older than this is "not measured"
 
 
-import os
-
-def _open_capture(index):
-    if os.name == "nt":
-        cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            ok, test_frame = cap.read()
-            if ok and test_frame is not None and test_frame.size > 0:
-                print(f"[CAMERA] Opened camera {index} with DirectShow (CAP_DSHOW): {test_frame.shape[1]}x{test_frame.shape[0]}")
-                return cap
-            print(f"[CAMERA] CAP_DSHOW opened camera {index} but read() failed, falling back to default backend")
-            cap.release()
-    cap = cv2.VideoCapture(index)
-    if cap.isOpened():
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        ok, test_frame = cap.read()
-        if ok and test_frame is not None and test_frame.size > 0:
-            print(f"[CAMERA] Opened camera {index} with default backend: {test_frame.shape[1]}x{test_frame.shape[0]}")
-            return cap
-        print(f"[CAMERA] Default backend opened camera {index} but read() failed")
-    else:
-        print(f"[CAMERA] Failed to open camera index={index} (isOpened=False)")
-    return cap
-
-
 class ClassroomAI:
     mode = "classroom"
 
-    def __init__(self, session_manager, class_id, camera_index=0, class_session_id=None):
+    def __init__(self, session_manager, class_id, camera_index=0, class_session_id=None, source=None):
         self.session_manager = session_manager
         self.class_id = int(class_id)
         # The pipeline only ever feeds the classroom session it was started for.
         self.class_session_id = class_session_id
         self.camera_index = camera_index
+        # Any CameraSource (saved IP camera / webcam); default: the local webcam, as always.
+        self.source = source if source is not None else WebcamSource(camera_index, warmup_reads=15)
         self.config = session_manager.config
         self.tracker = PersonTracker()
         self.face_recognizer = FaceRecognizer()
@@ -83,45 +62,54 @@ class ClassroomAI:
             num_faces=1,
         )
         self.detector = vision.FaceLandmarker.create_from_options(options)
-        self.cap = _open_capture(camera_index)
+        # Dedicated reader thread, latest frame only: no backlog, no frame analysed twice.
+        self.reader = LatestFrameReader(self.source, stale_after=3.0).start()
+        self._seq = 0
+        self._offline_at = 0.0
         self.device_ok = None
-        self._consecutive_failures = 0
-        self._last_reopen_at = 0.0
-        for _ in range(15):
-            if self.cap is not None and self.cap.isOpened():
-                ok, _ = self.cap.read()
-                if ok:
-                    self.device_ok = True
-                    break
-            time.sleep(0.1)
-        if self.device_ok is not True:
-            self.device_ok = False
-            print(f"[CAMERA] Warmup: no valid frames read from camera {camera_index} (device_ok=False)")
-        else:
-            print(f"[CAMERA] Warmup: camera {camera_index} verified valid frame read (device_ok=True)")
-
-
-
-        self.identity = IdentityManager(config=self.config.identity)
-        self.names = {}
-        self.reload_gallery()
+        # Identity layer: auto recognition (multi-template), teacher tags, enrollment, attendance plan.
+        self.coord = ClassroomIdentity(session_manager, self.class_id, class_session_id, config=self.config)
+        self.identity = self.coord.identity
+        self.names = dict(self.coord.roster)
         self._landmark_cache = {}   # track_id -> (timestamp, ear, yaw, pitch)
         self.last_debug = {}
+        self.last_frame_meta = {}   # identity decisions + latency of the last frame (evaluation tool)
+        evidence = getattr(session_manager, "evidence", None)
+        if evidence is not None and evidence.enabled:
+            evidence.cropper = crop_jpeg
 
     def reload_gallery(self):
-        rows = self.session_manager.repo.get_student_embeddings_by_class(self.class_id)
-        self.identity.set_gallery({r["student_id"]: r["embedding"] for r in rows})
-        self.names = {r["student_id"]: r["full_name"] for r in rows}
-        print(f"[CLASSROOM AI] Gallery: {self.identity.gallery_size} enrolled faces for class {self.class_id}")
+        # Only students with ACTIVE face-recognition consent (server-enforced).
+        self.coord.reload_gallery()
+        print(f"[CLASSROOM AI] Gallery: {self.coord.gallery_size} students with face templates, class {self.class_id}")
 
     # Backwards compatibility with admin face registration hook in app.py
     @property
     def known_students(self):
         return self.names
 
-    def release(self):
-        if self.cap is not None and self.cap.isOpened():
-            self.cap.release()
+    def release(self, final=False):
+        """``final``: the class itself ended (pending progressive samples may be committed)."""
+        self.reader.stop()
+        self.coord.close(final=final)
+
+    def camera_health(self):
+        return self.reader.health()
+
+    def _offline(self):
+        """No new frame and no signal: nothing is analysed (NO_CAMERA_SIGNAL, never AWAY)."""
+        # Still connecting for the first time: not "unavailable" yet (the UI shows STARTING).
+        self.device_ok = None if (self.reader.state == "CONNECTING" and self.reader.seq == 0) else False
+        self.last_frame_meta = {}  # no frame analysed: evaluation tools must not record one
+        now = time.time()
+        if now - self._offline_at < 0.5:
+            return None, False, "NO_CAMERA_SIGNAL"
+        self._offline_at = now
+        dummy = np.zeros((480, 640, 3), dtype=np.uint8)
+        label = "DANG KET NOI LAI CAMERA..." if self.reader.state == "RECONNECTING" else "CLASSROOM CAMERA OFFLINE"
+        cv2.putText(dummy, label, (110, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        _, buf = cv2.imencode(".jpg", dummy)
+        return buf.tobytes(), False, "NO_CAMERA_SIGNAL"
 
     def _landmarks(self, track_id, crop, now):
         cached = self._landmark_cache.get(track_id)
@@ -140,44 +128,22 @@ class ClassroomAI:
         self._landmark_cache[track_id] = value
         return value[1:]
 
-    def get_frame(self):
+    def get_frame(self, block=0.0):
+        """Analyse the newest frame. ``block`` > 0 (plain-thread tools only) waits up to that many
+        seconds for a new frame; the server's stream loop polls with block=0 (never blocks eventlet)."""
         runtime = self.session_manager.classroom_runtime(self.class_id, self.class_session_id)
-        now = time.time()
-
-        if self.cap is None or not self.cap.isOpened():
-            if now - self._last_reopen_at >= 2.0:
-                self._last_reopen_at = now
-                print(f"[CAMERA] Capture handle closed, attempting reopen for camera {self.camera_index}")
-                self.cap = _open_capture(self.camera_index)
-
-        ok, frame = (False, None)
-        if self.cap is not None and self.cap.isOpened():
-            ok, frame = self.cap.read()
-
-        if not ok or frame is None or frame.size == 0:
-            self._consecutive_failures += 1
-            self.device_ok = False
-            if self._consecutive_failures == 1 or self._consecutive_failures % 25 == 0:
-                print(f"[CAMERA] cap.read() failed for camera {self.camera_index} (failures={self._consecutive_failures})")
-            # Safely recover camera connection after consecutive failures with rate limit
-            if self._consecutive_failures >= 3 and (now - self._last_reopen_at) >= 2.0:
-                self._last_reopen_at = now
-                print(f"[CAMERA] Reconnecting camera {self.camera_index} after {self._consecutive_failures} failures...")
-                try:
-                    if self.cap is not None:
-                        self.cap.release()
-                except Exception:
-                    pass
-                time.sleep(0.15)
-                self.cap = _open_capture(self.camera_index)
-
-            time.sleep(0.1)
-            return None, False, "NO_CAMERA_SIGNAL"
-
-        self._consecutive_failures = 0
-        self.device_ok = True
-
-        now = time.time()
+        latest = self.reader.wait_newer(self._seq, block) if block else self.reader.get_newer(self._seq)
+        if latest is None:
+            if self.reader.has_signal():
+                self.device_ok = True
+                return None, False, "OK"      # stream healthy, no NEW frame yet: nothing to analyse
+            return self._offline()
+        self.device_ok = True         # read by the server to report a truthful camera state
+        self._seq = latest.seq
+        frame = latest.image.copy()   # overlays are drawn on our copy only
+        now = latest.timestamp        # when the frame arrived (not when we got round to it)
+        frame_age_ms = max(0.0, (time.time() - now) * 1000.0)   # camera ingest latency, measured separately
+        t_start = time.perf_counter()
         h, w = frame.shape[:2]
         tracked = self.tracker.track(frame)
         persons = {p["track_id"]: tuple(p["bbox"]) for p in tracked}
@@ -204,41 +170,65 @@ class ClassroomAI:
             "frame_hw": [h, w],
             "phones_associated": {str(k): round(v, 3) for k, v in phone_by_track.items()},
         }
-        now = time.time()
-        decisions = self.identity.process_frame(
-            [(tid, faces[face_by_track[tid]].embedding if tid in face_by_track else None, tid in phone_by_track)
-             for tid in persons], now)
+        t_id = time.perf_counter()
+        decisions = self.coord.identify(
+            now, persons, {tid: faces[face_by_track[tid]].embedding for tid in persons if tid in face_by_track},
+            occluded=set(phone_by_track), frame_hw=(h, w))
+        identity_ms = (time.perf_counter() - t_id) * 1000.0
 
-        now = time.time()
-        observations = {}
+        observations, face_obs, poses = {}, {}, {}
         for tid, box in persons.items():
             d = decisions.get(tid)
-            if d is None or d.status != CONFIRMED or d.student_id is None:
-                continue
             crop = None
             if tid in face_by_track:
                 fx1, fy1, fx2, fy2 = map(int, face_boxes[face_by_track[tid]])
                 fw, fh = fx2 - fx1, fy2 - fy1
                 crop = frame[max(0, fy1 - fh // 4):min(h, fy2 + fh // 4), max(0, fx1 - fw // 4):min(w, fx2 + fw // 4)]
-            ear, yaw, pitch = self._landmarks(tid, crop, now)
-            self.last_debug.setdefault("landmarks", {})[str(tid)] = [
-                None if v is None else round(float(v), 3) for v in (ear, yaw, pitch)]
-            observations[d.student_id] = Observation(
+            if d is not None and d.status == CONFIRMED and d.student_id is not None:
+                poses[tid] = self._landmarks(tid, crop, now)
+                ear, yaw, pitch = poses[tid]
+                self.last_debug.setdefault("landmarks", {})[str(tid)] = [
+                    None if v is None else round(float(v), 3) for v in (ear, yaw, pitch)]
+            if tid in face_by_track:
+                f = faces[face_by_track[tid]]
+                fx1, fy1, fx2, fy2 = map(int, face_boxes[face_by_track[tid]])
+                gray = cv2.cvtColor(frame[max(0, fy1):max(0, fy2), max(0, fx1):max(0, fx2)], cv2.COLOR_BGR2GRAY) \
+                    if fx2 > fx1 and fy2 > fy1 else None
+                _e, yaw, pitch = poses.get(tid, (None, None, None))
+                # in memory for this frame only: quality check of an enrollment candidate, never stored
+                face_obs[tid] = FaceObs(f.embedding, face_boxes[face_by_track[tid]],
+                                        float(getattr(f, "det_score", 0.0) or 0.0), gray, yaw, pitch)
+        plan = self.coord.after_frame(now, decisions, face_obs, frame_hw=(h, w), occluded=set(phone_by_track))
+        if plan.get("closed"):
+            runtime = None          # the pipeline was closed meanwhile: this frame updates no one
+        for tid, sid in plan["confirmed"].items():
+            d = decisions[tid]
+            ear, yaw, pitch = poses.get(tid, (None, None, None))
+            observations[sid] = Observation(
                 timestamp=now, visible=True, face_visible=tid in face_by_track, ear=ear, yaw=yaw, pitch=pitch,
                 phone_confidence=phone_by_track.get(tid), identity_confidence=d.confidence, track_id=tid,
-                seat=seats.get(tid), source="classroom_camera")
+                seat=seats.get(tid), source="classroom_camera",
+                extra=dict(plan["bindings"].get(tid) or {}))      # binding provenance for attendance evidence
+        for sid in plan["unresolved_students"]:
+            # Someone unidentified is in the frame who could be this student: no AWAY timer, no absence.
+            observations.setdefault(sid, Observation(timestamp=now, visible=False, source="classroom_camera",
+                                                     extra={"identity_unresolved": True}))
         for tid in list(self._landmark_cache):
             if tid not in persons:
                 del self._landmark_cache[tid]
 
-        frame_now = time.time()
         if runtime is not None:
-            runtime.process_frame(frame_now, observations)
+            runtime.process_frame(now, observations, unidentified=plan["unidentified"])
+
+        evidence = getattr(self.session_manager, "evidence", None)
+        evidence_on = evidence is not None and evidence.enabled and runtime is not None
+        # Evidence frames come from the camera image BEFORE names/states/scores are drawn on it.
+        clean_jpeg = cv2.imencode(".jpg", frame)[1].tobytes() if evidence_on else None
 
         # ---- visualisation only -------------------------------------------------
         for tid, (x1, y1, x2, y2) in persons.items():
             d = decisions.get(tid)
-            if d is not None and d.status == CONFIRMED and runtime is not None:
+            if d is not None and d.status == CONFIRMED and runtime is not None and not d.review_required:
                 view = runtime.student_view(d.student_id) or {}
                 state = view.get("focus_state", rs.FOCUS_UNKNOWN)
                 color = STATE_COLORS.get(state, (200, 200, 200))
@@ -249,8 +239,36 @@ class ClassroomAI:
                 status = d.status if d else "UNKNOWN"
                 label = f"Track {tid}: {status}"
             cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-        ret, buf = cv2.imencode(".jpg", frame)
-        if not ret or buf is None:
-            print("[CAMERA] cv2.imencode failed to generate JPEG")
-            return None, False, "JPEG_ENCODE_FAILED"
-        return buf.tobytes(), False, "OK"
+            cv2.putText(frame, label, (int(x1), max(12, int(y1) - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        _, buf = cv2.imencode(".jpg", frame)
+        jpeg = buf.tobytes()
+        self.last_frame_meta = {
+            "t": now, "latency_ms": (time.perf_counter() - t_start) * 1000.0, "identity_latency_ms": identity_ms,
+            "frame_age_ms": frame_age_ms, "camera_id": getattr(self.source, "camera_id", None),
+            "tracks": {tid: {"status": d.status, "student_id": d.student_id if d.status == CONFIRMED else None,
+                             "confidence": round(float(d.confidence), 4)} for tid, d in decisions.items()},
+        }
+        if evidence_on:
+            # RAM ring buffer only; a clip is written only around an event of a
+            # student with ACTIVE event-evidence consent (OFF by default), and
+            # only from frames cropped to that student (EvidenceService._save_clip).
+            boxes = {sid: persons[tid] for tid, sid in plan["confirmed"].items() if tid in persons}
+            evidence.push_frame(runtime.class_session_id, now, clean_jpeg, boxes)
+        return jpeg, False, "OK"
+
+
+def crop_jpeg(jpeg, box, margin=0.15):
+    """Crop an evidence frame to one student's box so a clip shows as little of
+    other students as possible."""
+    arr = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+    if arr is None:
+        return None
+    h, w = arr.shape[:2]
+    x1, y1, x2, y2 = box
+    mx, my = (x2 - x1) * margin, (y2 - y1) * margin
+    x1, y1 = max(0, int(x1 - mx)), max(0, int(y1 - my))
+    x2, y2 = min(w, int(x2 + mx)), min(h, int(y2 + my))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    ok, buf = cv2.imencode(".jpg", arr[y1:y2, x1:x2])
+    return buf.tobytes() if ok else None

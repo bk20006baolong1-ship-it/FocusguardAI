@@ -18,11 +18,23 @@ CONN_ONLINE = "ONLINE"
 CONN_OFFLINE = "OFFLINE"
 CONN_NOT_APPLICABLE = "NOT_APPLICABLE"
 
+# identity_source (provenance of the current binding; kept apart from identity_status)
+SRC_AUTO_FACE = "AUTO_FACE"                  # face recognition, temporal confirmation
+SRC_TEACHER_TAG = "TEACHER_TAG"              # teacher tagged the person track
+SRC_AUTO_RECOVERED = "AUTO_RECOVERED"        # re-identified after the track was lost
+SRC_TEACHER_CORRECTED = "TEACHER_CORRECTED"  # teacher replaced a wrong identity
+
 # attendance_status
-ATT_NOT_YET = "NOT_YET"           # class running, student not seen yet
+ATT_NOT_SEEN = "NOT_SEEN"         # class running, student not confirmed yet (not "absent")
+ATT_NOT_YET = ATT_NOT_SEEN        # backwards-compatible name
 ATT_PRESENT = "PRESENT"
 ATT_LATE = "LATE"
-ATT_ABSENT = "ABSENT"             # final value once the class ended unseen
+ATT_ABSENT = "ABSENT"             # final value: never confirmed before attendance finalisation
+# attendance_source
+ATT_SRC_AUTO_FACE = "AUTO_FACE"
+ATT_SRC_TEACHER_CONFIRMED = "TEACHER_CONFIRMED"   # teacher tagged / confirmed the student on camera
+ATT_SRC_TEACHER_CORRECTED = "TEACHER_CORRECTED"   # teacher overrode the status (never auto-overwritten)
+ATT_SRC_AUTO_FINALIZED = "AUTO_FINALIZED"         # NOT_SEEN -> ABSENT at finalisation
 
 # visibility_status
 VIS_NOT_SEEN = "NOT_SEEN"
@@ -30,6 +42,9 @@ VIS_VISIBLE = "VISIBLE"
 VIS_TEMPORARILY_NOT_VISIBLE = "TEMPORARILY_NOT_VISIBLE"
 VIS_AWAY = "AWAY"
 VIS_NO_SIGNAL = "NO_CAMERA_SIGNAL"  # camera pipeline stalled; nothing is known
+# Not confirmed on any track, but a person whose identity is not resolved is in the frame
+# and could be this student: never counted as AWAY / absent while unresolved.
+VIS_IDENTITY_UNRESOLVED = "IDENTITY_UNRESOLVED"
 
 # focus_state
 FOCUS_UNKNOWN = "UNKNOWN"         # no measurement (not seen / no signal)
@@ -42,7 +57,7 @@ FOCUS_AWAY = "AWAY"
 
 VI_LABELS = {
     # attendance
-    ATT_NOT_YET: "Chưa điểm danh",
+    ATT_NOT_SEEN: "Chưa thấy",
     ATT_PRESENT: "Có mặt",
     ATT_LATE: "Đi muộn",
     ATT_ABSENT: "Vắng mặt",
@@ -56,6 +71,11 @@ VI_LABELS = {
     VIS_TEMPORARILY_NOT_VISIBLE: "Tạm khuất",
     VIS_AWAY: "Rời chỗ",
     VIS_NO_SIGNAL: "Mất tín hiệu camera",
+    VIS_IDENTITY_UNRESOLVED: "Chưa xác định danh tính",
+    # identity source
+    SRC_AUTO_FACE: "Nhận diện khuôn mặt", SRC_TEACHER_TAG: "Giáo viên gắn tên",
+    SRC_AUTO_RECOVERED: "Nhận lại tự động", SRC_TEACHER_CORRECTED: "Giáo viên sửa",
+    ATT_SRC_TEACHER_CONFIRMED: "Giáo viên xác nhận", ATT_SRC_AUTO_FINALIZED: "Tự chốt khi kết thúc",
     # focus
     FOCUS_UNKNOWN: "Không có dữ liệu",
     FOCUS_FOCUSED: "Tập trung",
@@ -81,6 +101,36 @@ LEGACY_STATE = {
 
 
 @dataclass
+class AttendanceEvidence:
+    """One sighting that supports a check-in, with its provenance (session_runtime evidence ledger).
+    ``key`` groups repeated sightings of the same binding; revoked evidence is kept, never deleted."""
+    evidence_id: str
+    key: str
+    student_id: int
+    class_session_id: Optional[int]
+    class_id: Optional[int]
+    track_id: Optional[int]
+    binding_id: Optional[str]
+    identity_source: Optional[str]          # AUTO_FACE / AUTO_RECOVERED / TEACHER_TAG / TEACHER_CORRECTED
+    attendance_source: str                  # ATT_SRC_AUTO_FACE / ATT_SRC_TEACHER_CONFIRMED
+    first_seen_at: float                    # the person was in the room from (lateness is decided on this)
+    confirmed_at: float                     # identity confirmed (evidence recorded)
+    last_seen_at: float
+    late: bool
+    revoked_at: Optional[float] = None
+    revoked_reason: Optional[str] = None
+    revoked_by: Optional[int] = None
+
+    def row(self) -> dict:
+        return {"evidence_id": self.evidence_id, "class_session_id": self.class_session_id, "class_id": self.class_id,
+                "student_id": self.student_id, "track_id": self.track_id, "binding_id": self.binding_id,
+                "identity_source": self.identity_source, "attendance_source": self.attendance_source,
+                "first_seen_at": self.first_seen_at, "confirmed_at": self.confirmed_at,
+                "last_seen_at": self.last_seen_at, "late": self.late, "revoked_at": self.revoked_at,
+                "revoked_reason": self.revoked_reason, "revoked_by": self.revoked_by}
+
+
+@dataclass
 class StudentRuntimeState:
     student_id: int
     display_name: str = ""
@@ -90,9 +140,13 @@ class StudentRuntimeState:
     identity_status: str = ID_NOT_SEEN
     identity_confidence: Optional[float] = None
     active_track_id: Optional[int] = None
+    identity_source: Optional[str] = None       # SRC_* of the current / last binding
+    identity_review: bool = False               # contradicting evidence: teacher must resolve
 
     connection_status: str = CONN_NOT_APPLICABLE
-    attendance_status: str = ATT_NOT_YET
+    attendance_status: str = ATT_NOT_SEEN
+    attendance_source: Optional[str] = None
+    attendance_locked: bool = False             # teacher override: never auto-overwritten this session
     visibility_status: str = VIS_NOT_SEEN
 
     focus_state: str = FOCUS_UNKNOWN
@@ -104,6 +158,8 @@ class StudentRuntimeState:
     first_seen_at: Optional[float] = None
     last_seen_at: Optional[float] = None
     checkin_at: Optional[float] = None
+    checkin_track_id: Optional[int] = None     # person track of the check-in sighting (server-side only)
+    finalized_absent: bool = False             # auto-finalised ABSENT (a later sighting is LATE)
     not_visible_since: Optional[float] = None
     last_update_at: Optional[float] = None
 
@@ -115,6 +171,9 @@ class StudentRuntimeState:
     event_counts: Dict[str, int] = field(default_factory=dict)
     active_episodes: Dict[str, dict] = field(default_factory=dict)
     score_integral: float = 0.0  # sum(score * dt) for time-weighted average
+    # Context reading of the behaviour in force (focusguard.policies); None
+    # when no sustained behaviour. Observed focus_state is never replaced.
+    interpretation: Optional[dict] = None
 
     def count_event(self, kind: str):
         self.event_counts[kind] = self.event_counts.get(kind, 0) + 1
@@ -141,6 +200,9 @@ class StudentRuntimeState:
             "class_id": self.class_id,
             "roll": self.roll,
             "identity_status": self.identity_status,
+            "identity_source": self.identity_source,
+            "identity_review": self.identity_review,
+            "attendance_source": self.attendance_source,
             "identity_confidence": None if self.identity_confidence is None else round(self.identity_confidence, 3),
             "active_track_id": self.active_track_id,
             "connection_status": self.connection_status,
@@ -163,9 +225,14 @@ class StudentRuntimeState:
             # What the teacher needs to act on: which behaviour and since when
             # (server clock; pair with the snapshot's server_time for durations).
             "behaviors": [{"type": k, "since": ep.get("start_time"), "label": VI_LABELS.get(k, k),
-                           "confidence": ep.get("confidence")}
+                           "confidence": ep.get("confidence"),
+                           "alert": (ep.get("interpretation") or {}).get("alert", True),
+                           "interpreted_state": (ep.get("interpretation") or {}).get("interpreted_state"),
+                           "penalty_multiplier": (ep.get("interpretation") or {}).get("penalty_multiplier", 1.0),
+                           "severity": (ep.get("interpretation") or {}).get("severity", "normal")}
                           for k, ep in sorted(self.active_episodes.items(),
                                               key=lambda kv: kv[1].get("start_time") or 0)],
+            "interpretation": self.interpretation,
             "not_visible_since": self.not_visible_since,
             "last_seen_at": self.last_seen_at,
             "labels": {

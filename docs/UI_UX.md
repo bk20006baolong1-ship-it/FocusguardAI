@@ -31,7 +31,25 @@ Cột cuối ghi vấn đề chính của giao diện cũ đã được xử lý
 | Đăng ký khuôn mặt (hộp thoại) | Quản trị | Chụp 3–5 ảnh, lưu | "Đang kiểm tra…" | — | Từng lỗi camera có hướng dẫn riêng | Một cột | Trạng thái `role=status` | Không có giải thích quyền riêng tư, không cần xác nhận đồng ý |
 | Trang lỗi 403 / 404 / 405 / 413 / 500 | Tất cả | Về trang chính / thử lại | — | — | Thông điệp tiếng Việt, không lộ chi tiết kỹ thuật | Có | Tiêu đề rõ | Trang lỗi mặc định của máy chủ bằng tiếng Anh |
 
+| Sự kiện `/teacher/events` | Giáo viên | Lọc; Xác nhận đúng / Báo nhầm / Không chắc / Ghi chú | Khung xương | "Không có sự kiện nào khớp bộ lọc" | Thử lại | Bảng thành thẻ | Bảng có `caption`, nút có `aria-label` theo học sinh | (mới) góp ý BTC D |
+| Đánh giá thực tế `/teacher/evaluation` | Giáo viên | Bắt đầu đánh giá, chọn hoạt động, gán nhãn, xem chỉ số | Khung xương | "Chưa có buổi đánh giá nào" | Lỗi trong biểu mẫu | Một cột | Nhóm nút `role=group` + `aria-pressed` | (mới) góp ý BTC A/C |
+| Dữ liệu & quyền riêng tư `/admin/privacy` | Quản trị | Ghi nhận / thu hồi đồng ý, xóa dữ liệu, xuất dữ liệu, nhật ký | Khung xương | "Chưa có thao tác nào" | Thử lại | Bảng thành thẻ | Hộp xác nhận cho mọi thao tác xóa | (mới) góp ý BTC E |
+
 `/mobile` (khung điện thoại giả lập) đã bỏ; đường dẫn vẫn hoạt động và chuyển về trang chính.
+
+### Bổ sung theo góp ý BTC
+
+* **Hoạt động của lớp** (trang Giám sát): nhóm nút chip (≥ 44px, `aria-pressed`, dấu ✓ khi chọn – không chỉ dựa vào
+  màu). Tín hiệu được hoạt động giải thích hiển thị trung tính "… · phù hợp hoạt động" và không vào "Cần chú ý ngay".
+* **Cần giáo viên xem lại** (trang Giám sát): "Có N sự kiện chưa được xác nhận"; không có xếp hạng hay nhận xét học sinh.
+* **Hộp xem lại sự kiện**: thông tin sự kiện, cách hiểu theo hoạt động, đoạn minh chứng (nếu có: **Xem đoạn minh
+  chứng**, không tự phát, thời lượng, thời điểm, thời gian tự xóa, **Xóa ngay**), ghi chú và ba nút kết quả.
+* **Hộp ghi nhận đồng ý** (quản trị): người giám hộ, quan hệ, phạm vi (nhận diện khuôn mặt / minh chứng / đánh giá),
+  hạn; hộp đăng ký khuôn mặt hiển thị trạng thái đồng ý từ máy chủ thay cho ô đánh dấu.
+* **Phụ huynh**: mục "Quyền riêng tư của con" với trạng thái đồng ý, thời hạn lưu và nút **Thu hồi đồng ý**.
+* Câu về quyền riêng tư ở thanh bên/camera/đăng nhập lấy từ một nguồn (`focusguard/privacy/policy.py`) và đổi theo
+  Evidence Mode. Không dùng hộp thoại `alert/confirm` của trình duyệt (kiểm tra bằng Playwright: 0 hộp thoại gốc,
+  0 lỗi JavaScript, không cuộn ngang ở 390px).
 
 ## 2. Hệ thống thiết kế
 
@@ -91,16 +109,25 @@ cùng và tự đọc lại trạng thái từ máy chủ.
 
 ## 5. Kiểm chứng
 
-* `tests/test_ui_contract.py` (41 test) và các test UI trong `tests/test_review_regressions.py`: mọi trang của từng
+* `tests/test_ui_contract.py`, `tests/test_policy_branches_and_wording.py` và các test UI trong `tests/test_review_regressions.py`: mọi trang của từng
   vai trò mở được, không có liên kết chết, sai vai trò bị chuyển hướng, phiên hết hạn có thông báo, đăng nhập sai
   không lộ tài khoản có tồn tại hay không, bắt đầu/kết thúc idempotent, trạng thái camera, lỗi không lộ chi tiết nội bộ.
 * Đã đi thử bằng trình duyệt cả bốn vai trò trên máy chủ cục bộ (đăng nhập, bắt đầu/kết thúc buổi học, chi tiết học sinh,
   lịch sử, phân tích, thêm/xóa tài khoản, hộp đăng ký khuôn mặt, trang 404, truy cập sai vai trò).
+* Đi thử tự động bằng Playwright (Chromium) — `pip install -r requirements-dev.txt`, `python -m playwright install chromium`, `python tools/ui_walkthrough.py` (xem README) — trên ứng dụng thật với CSDL SQLite tạm, dữ liệu tạo qua runtime thật, ở
+  1366 px và 390 px: 222/222 kiểm tra đạt (thêm Cài đặt › Camera và khởi tạo danh sách / gắn tên). Gồm: Giám sát, hoạt động lớp, bắt đầu/kết thúc buổi, "Cần giáo viên xem lại",
+  Sự kiện, hộp xem lại, đoạn minh chứng, Phân tích, Đánh giá thực tế (kịch bản), Quyền riêng tư, đồng ý, thu hồi,
+  nhật ký, trang học sinh (chỉ dữ liệu của mình), trang phụ huynh (chỉ con được liên kết), chuỗi XSS trong tên hiển thị
+  không chạy; kiểm tra 0 lỗi JavaScript ngoài dự kiến, 0 request lỗi ngoài dự kiến, 0 cuộn ngang, 0 hộp thoại gốc.
 * Các trạng thái trực tiếp trên trang Giám sát được xem bằng cách đưa quan sát theo kịch bản vào đúng
   `SessionRuntime` thật (công cụ QA ngoài repo); luồng camera thật trên giao diện mới **chưa** được chạy lại vì
   phiên làm việc này không được macOS cấp quyền camera. Trạng thái "Không dùng được camera" đã được thấy trực tiếp.
 
 ## 6. Hạn chế đã biết
+
+* Trình phát đoạn minh chứng hiển thị chuỗi ảnh JPEG (không phải tệp video) để không cần bộ mã hóa video trên máy chủ.
+* Nhãn thực tế trên trang Đánh giá thực tế nhập theo phút:giây hoặc bấm bắt đầu/kết thúc; bảng CSV của người quan sát
+  nhập bằng công cụ dòng lệnh.
 
 * Camera chỉ phân tích khi trang Giám sát (giáo viên) hoặc trang Phiên học (học sinh) đang mở; các trang khác có
   dải thông báo nhắc điều này. Đây là giới hạn kiến trúc hiện tại (luồng MJPEG gắn với người xem).

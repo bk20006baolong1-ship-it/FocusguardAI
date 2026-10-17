@@ -1,0 +1,6 @@
+# Development / browser verification: the hardware-free CI set plus the tools only
+# developers run. Install: pip install -r requirements-dev.txt
+# The Chromium browser is a binary, not a Python package: python -m playwright install chromium
+-r requirements-ci.txt
+playwright==1.56.0    # tools/ui_walkthrough.py (browser walkthrough)
+pillow>=10            # tools/ui_demo_server.py (grey demo frames + evidence crop)

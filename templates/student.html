@@ -71,7 +71,7 @@
               <p class="fg-camera-state-text">Bấm Bắt đầu học để bật camera.</p>
             </div>
           </div>
-          <p class="fg-helper mb-0"><i class="fa-solid fa-shield-halved me-1" aria-hidden="true"></i>Hình ảnh chỉ được phân tích trực tiếp, không ghi hình và không lưu ảnh.</p>
+          <p class="fg-helper mb-0"><i class="fa-solid fa-shield-halved me-1" aria-hidden="true"></i>{{ privacy_notice }}</p>
         </div>
       </section>
 
@@ -179,7 +179,7 @@
         <div class="form-check form-switch fg-field">
           <input class="form-check-input" type="checkbox" role="switch" id="prefSound">
           <label class="form-check-label" for="prefSound">Phát âm báo nhắc nhở</label>
-          <div class="fg-helper">Phát một tiếng "bíp" ngắn khi hệ thống ghi nhận em mất tập trung trong phiên học.</div>
+          <div class="fg-helper">Phát một tiếng "bíp" ngắn khi AI ghi nhận một tín hiệu (ví dụ dùng điện thoại, quay đi chỗ khác) trong phiên học. Đây chỉ là nhắc nhở, không phải kết luận.</div>
         </div>
         <div class="fg-field">
           <label class="form-label" for="prefVolume">Âm lượng: <span id="prefVolumeValue">50</span>%</label>
@@ -204,7 +204,7 @@
     <div class="fg-card-body">
       <ul class="mb-0 ps-3">
         <li>Camera chỉ hoạt động khi em bấm Bắt đầu học hoặc khi giáo viên bật camera lớp học.</li>
-        <li>Hình ảnh được phân tích ngay trên máy chủ của trường, không ghi hình và không lưu ảnh.</li>
+        <li>Hình ảnh được phân tích ngay trên máy chủ của trường. {{ privacy_notice }} Phiên tự học cá nhân không bao giờ lưu đoạn minh chứng.</li>
         <li>Hệ thống chỉ ghi lại hành vi nhìn thấy được (dùng điện thoại, buồn ngủ, quay đi, rời chỗ) và điểm tập trung.</li>
         <li>Điểm tập trung là thông tin tham khảo để giúp em học tốt hơn, không dùng để xếp loại.</li>
       </ul>

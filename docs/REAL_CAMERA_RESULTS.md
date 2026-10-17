@@ -1,5 +1,18 @@
 # Kết quả kiểm tra với camera thật (tóm tắt đã làm sạch)
 
+> **Cập nhật sau góp ý BTC (lớp học trực tiếp, nhiều học sinh):** buổi thử dưới đây là **một người trước webcam laptop**,
+> giống học trực tuyến hơn lớp học trực tiếp. Đã triển khai framework đánh giá lớp học thật
+> (`docs/REAL_CLASSROOM_EVALUATION_PROTOCOL.md`, `tools/run_classroom_evaluation.py`, trang *Đánh giá thực tế*);
+> kết quả accuracy chỉ được cập nhật sau khi hoàn thành evaluation có consent và ground truth.
+>
+> | Hạng mục | Trạng thái |
+> |---|---|
+> | Camera đặt trên bảng / góc lớp, nhiều học sinh | HARDWARE_REQUIRED (chưa chạy) |
+> | Chép bài, nhìn bảng, thảo luận nhóm, di chuyển trong lớp | HARDWARE_REQUIRED + HUMAN_GROUND_TRUTH_REQUIRED |
+> | Hai người cắt nhau, người lạ, che mặt, đổi góc, lớp đông | Hợp đồng danh tính kiểm tra trên SYNTHETIC (10/10 PASS); camera thật chưa chạy |
+> | Precision / recall / báo nhầm mỗi giờ thực tế | NOT_EVALUATED |
+> | Hiệu năng runtime (không gồm mô hình) 5/10/20 HS | đo trên cloud, xem `benchmark.json` (SYNTHETIC) |
+
 **Đây là kiểm tra tích hợp và hành vi, không phải đánh giá độ chính xác.** Chỉ có một tình nguyện viên, một máy
 và một buổi thử. Không có con số độ chính xác nào được rút ra từ đây; độ chính xác thực tế vẫn là **NOT_EVALUATED**.
 Không lưu ảnh hay video; embedding khuôn mặt bị xoá sau mỗi lần chạy. Log chi tiết (chỉ gồm id, thời gian, trạng thái
@@ -8,6 +21,7 @@ và điểm) nằm ở `evaluation/private/`, đã git-ignore và không commit.
 ## Môi trường
 * MacBook Air Apple M3 (arm64), macOS 26.5.1, Python 3.12.8, camera FaceTime HD (index 0).
 * `requirements.txt` đầy đủ. `mediapipe` 0.10.35 kéo theo `opencv-contrib-python` 5.0, đè lên bản 4.13 được pin.
+  (Đã sửa sau đó: `requirements.txt` pin `opencv-contrib-python==4.13.0.92` cùng phiên bản với `opencv-python`.)
 * Pipeline lớp học (YOLOv8n + ByteTrack, InsightFace buffalo_sc, MediaPipe Face Landmarker) đạt khoảng **7.5 FPS** (trung vị) trên CPU.
 * Công cụ: `tools/real_camera_check.py`, chạy từ Terminal.app vì macOS không cấp quyền camera cho tiến trình của Claude.
 

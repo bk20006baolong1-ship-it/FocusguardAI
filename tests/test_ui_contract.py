@@ -15,9 +15,10 @@ TEMPLATES = os.path.join(ROOT, "templates")
 PAGES = {
     "hocsinh": ["/", "/stats", "/reports", "/settings"],
     "teacher": ["/teacher/dashboard", "/teacher/students", "/teacher/attendance", "/teacher/alerts",
-                "/teacher/analytics", "/teacher/reports", "/teacher/settings"],
+                "/teacher/analytics", "/teacher/reports", "/teacher/settings", "/teacher/events",
+                "/teacher/evaluation"],
     "phuhuynh": ["/parent/dashboard"],
-    "admin": ["/admin/accounts", "/admin/classes"],
+    "admin": ["/admin/accounts", "/admin/classes", "/admin/privacy"],
 }
 
 
@@ -312,7 +313,8 @@ def test_camera_hub_reports_a_pipeline_that_failed_to_start():
             pass
     _, generation = hub.acquire(key, Pipeline)                 # a retry clears the failure
     state = hub.describe(mine)
-    assert state == {"starting": False, "failed": False, "streaming": True, "viewers": 1, "device_ok": True}
+    assert state == {"starting": False, "failed": False, "streaming": True, "viewers": 1, "device_ok": True,
+                     "reconnecting": False, "health": None}
     hub.release(generation)
     assert hub.describe(mine)["streaming"] is False
 
@@ -375,3 +377,112 @@ def test_persistence_failures_are_logged_without_raw_exception_text(manager, clo
     assert any(log_type == "error" for log_type in (l["type"] for l in rt.class_view(clock())["logs"]))
     assert not any("sqlite3" in m or "/srv/private.db" in m for m in messages)
     manager.end_class(1)
+
+
+# ------------------------------------------------- BTC feedback screens
+def _html(client, path):
+    resp = client.get(path)
+    assert resp.status_code == 200, path
+    return resp.get_data(as_text=True)
+
+
+def test_event_review_page_has_filters_actions_and_columns(login_as):
+    html = _html(login_as("teacher"), "/teacher/events")
+    for el in ('id="fStudent"', 'id="fDate"', 'type="date"', 'id="fType"', 'id="fStatus"', 'id="fContext"',
+               'id="eventsBody"', 'id="feedbackBody"', 'aria-label="Lọc sự kiện"'):
+        assert el in html, el
+    for status in ("UNREVIEWED", "CONFIRMED", "FALSE_POSITIVE", "UNCERTAIN"):
+        assert f'value="{status}"' in html
+    for action in ("Xác nhận đúng", "Báo nhầm", "Không chắc", "Ghi chú"):
+        assert action in html, action
+    assert html.count('data-verdict="') == 3 and "Sự kiện cần xem lại" in html
+    js = open(os.path.join(ROOT, "static", "js", "feedback.js"), encoding="utf-8").read()
+    for col in ("AI phát hiện tín hiệu", "Kéo dài", "Độ tin cậy", "Hoạt động", "Trạng thái xem lại"):
+        assert col in js, col
+
+
+def test_dashboard_has_activity_context_and_needs_review_section(login_as):
+    html = _html(login_as("teacher"), "/teacher/dashboard")
+    assert 'id="contextButtons"' in html and 'role="group"' in html
+    for ctx in ("LECTURE", "WRITING", "LOOKING_AT_BOARD", "GROUP_DISCUSSION", "SELF_STUDY", "EXAM", "TRANSITION"):
+        assert f'data-context="{ctx}"' in html, ctx
+    assert html.count('aria-pressed="') >= 8 and "AI không tự đoán" in html
+    assert "Cần giáo viên xem lại" in html and 'id="reviewQueue"' in html
+    assert "js/feedback.js" in html
+
+
+def test_event_detail_modal_shows_evidence_controls_without_autoplay(login_as):
+    html = _html(login_as("teacher"), "/teacher/events")
+    assert 'id="eventModal"' in html and 'aria-labelledby="eventModalTitle"' in html
+    js = open(os.path.join(ROOT, "static", "js", "feedback.js"), encoding="utf-8").read()
+    assert "Xem đoạn minh chứng" in js and "Xóa ngay" in js and "tự xóa sau" in js
+    assert "autoplay" not in js.lower().replace("never autoplays", "") and "never autoplays" in js
+    assert "togglePlay" in js        # playback only starts from the "Phát" button
+
+
+def test_ground_truth_evaluation_page(login_as):
+    html = _html(login_as("teacher"), "/teacher/evaluation")
+    for el in ('id="evalForm"', 'id="eCameraPosition"', 'id="eCameraAngle"', 'id="eResolution"', 'id="eFps"',
+               'id="eDevice"', 'id="eLighting"', 'id="eContext"', 'id="eConsent"', 'id="annForm"', 'id="aLabel"',
+               'id="aStudent"', 'id="evalContextButtons"', 'id="evalMetricsBody"'):
+        assert el in html, el
+    assert "không ghi hình lén" in html and "Gán nhãn thực tế" in html
+
+
+def test_privacy_dashboard_consent_dialog_and_retention_display(login_as):
+    html = _html(login_as("admin"), "/admin/privacy")
+    for el in ('id="privacyBody"', 'id="auditBody"', 'id="consentModal"', 'id="cGuardian"', 'id="cRelation"',
+               'id="cAdult"', 'data-scope="face_recognition"', 'data-scope="event_evidence"',
+               'data-scope="evaluation"', 'id="retentionList"', 'id="retentionRun"', "js/privacy.js"):
+        assert el in html, el
+    for key in ("FACE_EMBEDDING_RETENTION_DAYS", "EVENT_METADATA_RETENTION_DAYS", "EVENT_EVIDENCE_RETENTION_HOURS",
+                "EVALUATION_DATA_RETENTION_DAYS"):
+        assert key in html, key
+    assert "Chế độ minh chứng: Đang tắt" in html          # Evidence Mode OFF by default
+    js = open(os.path.join(ROOT, "static", "js", "privacy.js"), encoding="utf-8").read()
+    for label in ("Xóa face embedding", "Xóa evidence", "Thu hồi đồng ý", "FG.confirm"):
+        assert label in js, label
+
+
+def test_face_enrolment_dialog_uses_server_consent_not_a_checkbox(login_as):
+    html = _html(login_as("admin"), "/admin/accounts")
+    assert 'id="faceConsentStatus"' in html and 'id="faceConsent"' not in html
+    js = open(os.path.join(ROOT, "static", "js", "admin.js"), encoding="utf-8").read()
+    assert "/api/admin/consent/" in js and "consentOk" in js
+
+
+def test_parent_sees_consent_and_can_revoke(login_as, manager):
+    from conftest import grant_consent
+    grant_consent(manager, 3, face_recognition=True)
+    html = _html(login_as("phuhuynh"), "/parent/dashboard")
+    assert "Quyền riêng tư của con" in html and 'id="parentRevoke"' in html and "Đang có hiệu lực" in html
+
+
+def test_privacy_notice_is_one_server_sentence_and_changes_with_evidence_mode(login_as):
+    html = _html(login_as("teacher"), "/teacher/dashboard")
+    assert html.count("Hình ảnh camera được phân tích trực tiếp, không ghi hình và không lưu ảnh.") >= 2
+    from focusguard.privacy import privacy_notice
+    from focusguard.privacy.settings import PrivacySettings
+    on = privacy_notice(PrivacySettings(evidence_enabled=True))
+    assert on.startswith("Mặc định FocusGuard không lưu video") and "tự xóa sau 24 giờ" in on
+
+
+def test_new_ui_accessibility_basics():
+    css = open(os.path.join(ROOT, "static", "css", "app.css"), encoding="utf-8").read()
+    assert ".fg-chip {" in css and "min-height: var(--fg-touch)" in css.split(".fg-chip {", 1)[1].split("}", 1)[0]
+    assert '.fg-chip[aria-pressed="true"]::before' in css           # selected state not by colour alone
+    assert ".fg-chip:focus-visible" in css
+    for name in ("teacher.html", "admin.html", "parent.html"):
+        src = open(os.path.join(TEMPLATES, name), encoding="utf-8").read()
+        for tag in re.findall(r"<button[^>]*>", src):
+            assert 'type="' in tag, (name, tag)
+        assert "onclick=" not in src
+
+
+def test_copywriting_uses_neutral_wording(login_as):
+    pages = [_html(login_as("teacher"), p) for p in ("/teacher/events", "/teacher/dashboard", "/teacher/analytics")]
+    js = open(os.path.join(ROOT, "static", "js", "feedback.js"), encoding="utf-8").read()
+    for text in pages + [js]:
+        for banned in ("AI violation", "Học sinh vi phạm", "AI sai", "Học sinh kém nhất", "Mất tập trung nhất"):
+            assert banned not in text
+    assert "Giáo viên xác nhận báo nhầm" in pages[0] and "AI phát hiện tín hiệu" in js

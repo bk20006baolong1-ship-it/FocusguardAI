@@ -52,15 +52,8 @@
 
     init() {
       $("startBtn").addEventListener("click", dashboard.start);
-      const feed = $("cameraFeed");
-      feed.addEventListener("load", () => {
-        dashboard.camera.error = false;
-        if (dashboard.data && dashboard.data.camera && dashboard.data.camera.state === "ACTIVE") {
-          feed.hidden = false;
-          $("cameraState").hidden = true;
-        }
-      });
-      feed.addEventListener("error", () => { if (dashboard.camera.src) { dashboard.camera.error = true; dashboard.renderCamera(); } });
+      $("stopBtn").addEventListener("click", dashboard.stop);
+      $("cameraFeed").addEventListener("error", () => { if (dashboard.camera.src) { dashboard.camera.error = true; dashboard.renderCamera(); } });
       $("cameraState").addEventListener("click", (e) => { if (e.target.closest("[data-camera-retry]")) dashboard.cameraRestart(); });
       document.addEventListener("fg:theme", () => { FG.chartDefaults(); if (dashboard.chart) { dashboard.chart.destroy(); dashboard.chart = null; dashboard.renderChart(); } });
       document.addEventListener("visibilitychange", () => {
@@ -171,7 +164,7 @@
     renderCounts() {
       const d = dashboard.data, box = $("countsBody");
       if (!d.is_active) {
-        FG.setState(box, { compact: true, icon: "fa-list", title: "Chưa có phiên học", text: "Số lần mất tập trung của phiên đang học sẽ hiện ở đây." });
+        FG.setState(box, { compact: true, icon: "fa-list", title: "Chưa có phiên học", text: "Số tín hiệu AI ghi nhận trong phiên đang học sẽ hiện ở đây." });
         box._sig = null;
         return;
       }
@@ -217,7 +210,7 @@
       if (!cam.src && !cam.error) { dashboard.cameraRestart(); return; }
       const c = d.camera || { state: "STARTING", label: "Đang khởi động camera", help: "" };
       const waited = (performance.now() - cam.startedAt) / 1000;
-      if (cam.error && c.state !== "ACTIVE") {
+      if (cam.error) {
         feed.hidden = true;
         setBadge("danger", "fa-video-slash", "Không có hình ảnh");
         show("fa-video-slash", "Không tải được hình ảnh camera", "Kết nối tới camera bị ngắt. Điểm tạm dừng, không bị trừ.", "Thử lại");
@@ -225,11 +218,6 @@
       }
       switch (c.state) {
         case "ACTIVE":
-          if (cam.error || !cam.src || !feed.src) {
-            cam.error = false;
-            cam.src = true;
-            feed.src = "/video_feed?t=" + Date.now();
-          }
           feed.hidden = false; overlay.hidden = true; overlay._sig = null;
           setBadge("success", "fa-video", "Đang hoạt động");
           break;
@@ -325,7 +313,7 @@
     $("detailModalBody").innerHTML =
       '<div class="fg-grid fg-grid-2 mb-3" style="gap: var(--fg-3);">' +
       '<div class="fg-card fg-metric"><span class="fg-metric-label">Điểm trung bình</span><span class="fg-metric-value' + (has ? "" : " is-na") + '">' + (has ? Math.round(r.avg_focus_score) : "Chưa có") + "</span></div>" +
-      '<div class="fg-card fg-metric"><span class="fg-metric-label">Số lần mất tập trung</span><span class="fg-metric-value">' + (r.total_distractions || 0) + "</span></div></div>" +
+      '<div class="fg-card fg-metric"><span class="fg-metric-label">Tín hiệu AI ghi nhận</span><span class="fg-metric-value">' + (r.total_distractions || 0) + "</span></div></div>" +
       (has ? '<p class="mb-0">Kết quả đã được lưu. Em có thể xem lại trong Lịch sử.</p>'
            : '<div class="fg-banner" data-tone="info"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><div>Camera chưa ghi nhận đủ dữ liệu nên phiên này không có điểm. Điểm được để trống thay vì ghi là 0.</div></div>');
     window.bootstrap.Modal.getOrCreateInstance($("detailModal")).show();
@@ -419,7 +407,7 @@
           return;
         }
         box.innerHTML = '<div class="fg-table-wrap"><table class="fg-table is-stack"><thead><tr><th>Thời gian</th><th>Môn học</th><th>Hình thức</th>' +
-          '<th class="is-num">Thời lượng</th><th class="is-num">Điểm trung bình</th><th class="is-num">Mất tập trung</th></tr></thead><tbody>' +
+          '<th class="is-num">Thời lượng</th><th class="is-num">Điểm trung bình</th><th class="is-num">Tín hiệu AI</th></tr></thead><tbody>' +
           list.map((s) => { const sc = sessionScore(s);
             return '<tr class="is-clickable" tabindex="0" data-session="' + s.id + '">' +
               '<td class="is-primary"><span class="fg-person-name">' + esc(FG.dateTime(s.start_time)) + "</span></td>" +
@@ -427,7 +415,7 @@
               '<td data-label="Hình thức">' + esc(SOURCE_LABEL[s.source] || "Tự học") + "</td>" +
               '<td class="is-num" data-label="Thời lượng">' + esc(FG.duration(s.duration_seconds)) + "</td>" +
               '<td class="is-num" data-label="Điểm trung bình">' + (sc === null ? '<span class="fg-muted">Chưa có</span>' : sc) + "</td>" +
-              '<td class="is-num" data-label="Mất tập trung">' + (s.total_distractions || 0) + " lần</td></tr>"; }).join("") +
+              '<td class="is-num" data-label="Tín hiệu AI">' + (s.total_distractions || 0) + " lần</td></tr>"; }).join("") +
           "</tbody></table></div>";
       } catch (e) {
         FG.setState(box, { error: true, title: "Không tải được lịch sử", text: e.message, retry: reports.load });
@@ -468,13 +456,13 @@
           '<h3 class="fg-card-title mb-2">Hành vi đã ghi nhận</h3>' +
           (bd.total ? '<dl class="fg-kv">' + ["PHONE", "DROWSY", "HEAD_AWAY", "AWAY"].map((t) => { const b = FG.behavior(t);
               return "<dt>" + FG.badge(b.label, b.tone, b.icon) + "</dt><dd>" + (counts[t] || 0) + " lần" + (dur[t] ? " · " + esc(FG.duration(dur[t])) : "") + "</dd>"; }).join("") + "</dl>"
-            : FG.stateHTML({ compact: true, icon: "fa-circle-check", title: "Không ghi nhận hành vi mất tập trung kéo dài nào" }));
+            : FG.stateHTML({ compact: true, icon: "fa-circle-check", title: "AI không ghi nhận tín hiệu kéo dài nào" }));
       } catch (e) {
         FG.setState(body, { error: true, compact: true, title: "Không tải được chi tiết phiên học", text: e.message, retry: () => reports.detail(id) });
       }
     },
     csv() {
-      const rows = [["Thời gian", "Môn học", "Hình thức", "Thời lượng (giây)", "Điểm trung bình", "Số lần mất tập trung"]].concat(
+      const rows = [["Thời gian", "Môn học", "Hình thức", "Thời lượng (giây)", "Điểm trung bình", "Số tín hiệu AI ghi nhận"]].concat(
         reports.sessions.map((s) => [s.start_time, s.subject || "", SOURCE_LABEL[s.source] || "Tự học", s.duration_seconds || 0,
           sessionScore(s) === null ? "" : sessionScore(s), s.total_distractions || 0]));
       const csv = rows.map((r) => r.map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(",")).join("\r\n");

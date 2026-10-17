@@ -13,6 +13,16 @@ from typing import Callable, Optional
 from focusguard import analytics
 from focusguard.behavior import Observation
 from focusguard.config import PipelineConfig
+from focusguard.policies import load_policy
+from focusguard.policies.contexts import normalize_context
+from focusguard.privacy import audit as audit_actions
+from focusguard.privacy.audit import AuditLog
+from focusguard.privacy.consent import SCOPE_FACE, ConsentService
+from focusguard.privacy.evidence import EvidenceService
+from focusguard.privacy.retention import RetentionService
+from focusguard.privacy.settings import PrivacySettings
+from focusguard.review import ReviewService
+from focusguard.session_identity import SessionIdentityStore
 from focusguard.session_runtime import (MODE_CLASSROOM, MODE_ONLINE, MODE_PERSONAL,
                                         RuntimeRegistry, SessionRuntime)
 from focusguard import runtime_state as rs
@@ -37,11 +47,21 @@ class RepositorySink:
     def save_session_student(self, row):
         self.repo.save_session_student(row)
 
+    def save_context_segment(self, row):
+        self.repo.save_context_segment(row)
+
+    def save_attendance_evidence(self, row):
+        self.repo.save_attendance_evidence(row)
+
+    def update_attendance_evidence(self, evidence_id, fields):
+        self.repo.update_attendance_evidence(evidence_id, fields)
+
 
 class SessionManager:
     def __init__(self, repo=None, config: Optional[PipelineConfig] = None,
                  notifier: Optional[Callable[[str, dict], None]] = None,
-                 seed_demo_accounts: bool = False, clock: Callable[[], float] = time.time):
+                 seed_demo_accounts: bool = False, clock: Callable[[], float] = time.time,
+                 privacy_settings: Optional[PrivacySettings] = None, policy=None, camera_service=None):
         if repo is None:
             from repository import get_repository
             repo = get_repository()
@@ -55,9 +75,60 @@ class SessionManager:
         self._lock = threading.RLock()
         # student_id -> {"session_id", "started_at", "class_id", "linked_class"}
         self._personal_sessions = {}
+        # Context interpretation policy (focusguard/policies/behavior_policy.json).
+        self.policy = policy or load_policy()
+        # Privacy services: consent, audit trail, evidence clips (OFF by default), retention.
+        self.privacy = privacy_settings or PrivacySettings.from_env()
+        self.audit = AuditLog(repo, clock)
+        self.evidence = EvidenceService(repo, self.privacy, self.audit, clock=clock)
+        self.face_listeners = []       # callables(student_id) -> e.g. reload a running camera gallery
+        self.consent = ConsentService(repo, self.audit, self.privacy, clock, evidence=self.evidence,
+                                      on_face_changed=self._face_changed)
+        self.evidence.consent = self.consent
+        self.retention = RetentionService(repo, self.privacy, self.audit, evidence=self.evidence,
+                                          consent=self.consent, clock=clock, on_face_changed=self._face_changed)
+        self.reviews = ReviewService(repo, self.audit, clock, evidence=self.evidence)
+        from focusguard.evaluation.real_classroom.service import EvaluationService
+        self.evaluation = EvaluationService(self)
+        from focusguard.face_profiles import FaceProfileService
+        # Multi-template face profiles (consent-checked writes, no vectors in audit).
+        self.faces = FaceProfileService(repo, self.consent, self.audit, clock, self.config.enrollment)
+        # Classroom pipeline factory (None = classroom_ai.ClassroomAI). Dev/test servers inject a simulator.
+        self.classroom_pipeline_factory = None
+        from focusguard.cameras.service import CameraService
+        # Account camera settings (saved IP cameras / webcams, defaults, class assignment).
+        self.cameras = camera_service or CameraService(repo, self.audit, clock=clock)
+
+    def _face_changed(self, student_id):
+        for fn in list(self.face_listeners):
+            try:
+                fn(student_id)
+            except Exception as exc:
+                print(f"[PRIVACY] face listener failed: {exc!r}")
+
+    def recognition_gallery(self, class_id):
+        """Embeddings the classroom camera may use: ONLY students whose consent
+        is ACTIVE with the face-recognition scope. Revoked / expired / missing
+        consent means the student is never recognised (stays UNKNOWN)."""
+        return [r for r in self.repo.get_student_embeddings_by_class(class_id)
+                if self.consent.has_scope(r["student_id"], SCOPE_FACE)]
+
+    def set_activity_context(self, class_id, context, actor=None):
+        """Teacher picks what the class is doing. Returns the new segment."""
+        ctx = normalize_context(context)
+        rt = self.registry.class_runtime(class_id)
+        if rt is None:
+            raise LookupError("no running class session")
+        seg = rt.set_activity_context(ctx, self.clock(), set_by=getattr(actor, "user_id", None))
+        self.audit.record(audit_actions.ACTIVITY_CONTEXT_CHANGED, actor, None,
+                          {"class_id": int(class_id), "class_session_id": rt.class_session_id, "context": ctx})
+        return seg
 
     # ================================================================ classes
-    def start_class(self, class_id: int, mode: str = MODE_CLASSROOM, started_by: Optional[int] = None) -> SessionRuntime:
+    def start_class(self, class_id: int, mode: str = MODE_CLASSROOM, started_by: Optional[int] = None,
+                    camera: Optional[dict] = None, initialize: bool = False) -> SessionRuntime:
+        """``camera``: metadata of the classroom camera (CameraService.evaluation_metadata) — id and
+        name only, never credentials or addresses. None = the local webcam 0 (as before)."""
         if mode not in (MODE_CLASSROOM, MODE_ONLINE):
             raise ValueError("mode must be 'classroom' or 'online'")
         with self._lock:
@@ -70,8 +141,17 @@ class SessionManager:
             runtime = SessionRuntime(
                 enrolled=enrolled, started_at=now, class_session_id=cs_id, class_id=int(class_id),
                 mode=mode, config=self.config, sink=self.sink, notifier=self._notify_for(class_id),
-                source="classroom_camera" if mode == MODE_CLASSROOM else "student_camera",
+                source="classroom_camera" if mode == MODE_CLASSROOM else "student_camera", policy=self.policy,
+                initializing=initialize,
             )
+            runtime.camera = dict(camera) if (camera and mode == MODE_CLASSROOM) else None
+            runtime.hooks.append(self.evidence)      # no-op unless EVENT_EVIDENCE_ENABLED
+            # Identity bindings belong to the class SESSION (not to a camera pipeline): they survive
+            # reconnects / reloads / rebuilt pipelines and are closed when the class ends (on_end hook).
+            runtime.identity_store = SessionIdentityStore(self.repo, class_id, cs_id) \
+                if mode == MODE_CLASSROOM else None
+            if runtime.identity_store is not None:
+                runtime.hooks.append(runtime.identity_store)
             self.registry.start_class(class_id, runtime, now)
             if mode == MODE_ONLINE:
                 self._link_running_personal_sessions(runtime, now)
@@ -125,6 +205,7 @@ class SessionManager:
                                          class_id=s["class_id"], roll=s.get("roll")).to_public_dict()
                   for s in self.repo.get_students_in_class(class_id)]
         return {"class_session_id": None, "class_id": int(class_id), "mode": None, "active": False,
+                "activity_context": None, "context_history": [], "policy_version": self.policy.version,
                 "camera_status": "INACTIVE", "started_at": None, "elapsed_seconds": 0, "students": roster,
                 "statistics": {"enrolled": len(roster), "present": 0, "visible": 0, "away": 0, "phone": 0,
                                "drowsy": 0, "head_away": 0, "average_focus_score": None,
@@ -160,7 +241,7 @@ class SessionManager:
                                "class_id": class_id}],
                     # class_id=None: self-study rows must never count as class data
                     started_at=now, session_id=session_id, class_id=None, mode=MODE_PERSONAL,
-                    config=self.config, sink=self.sink, source="personal_camera")
+                    config=self.config, sink=self.sink, source="personal_camera", policy=self.policy)
                 rt.set_connection(student_id, True)
                 self.registry.start_personal(student_id, rt, now)
             self._personal_sessions[student_id] = {"session_id": session_id, "started_at": now,
@@ -252,11 +333,27 @@ class SessionManager:
         rows = self.repo.get_session_students(student_id=student_id)
         return analytics.attendance_history(class_sessions, rows)
 
+    def _review_states(self, events):
+        """Latest teacher verdict per event id (raw events are never changed)."""
+        latest = {}
+        for cs in {e.get("class_session_id") for e in events if e.get("class_session_id") is not None}:
+            for r in self.repo.get_event_reviews(class_session_id=cs):
+                latest[r["event_id"]] = r["verdict"]
+        return latest
+
+    def _breakdown(self, events, measured):
+        """Event statistics without the events a teacher confirmed as false positives."""
+        states = self._review_states(events)
+        kept = [e for e in events if states.get(e.get("id")) != "FALSE_POSITIVE"]
+        out = analytics.event_breakdown(kept, measured)
+        out["excluded_false_positives"] = len(events) - len(kept)
+        return out
+
     def session_breakdown(self, session_id):
         events = self.repo.get_focus_events(session_id=session_id)
         sess = self.repo.get_session(session_id) or {}
         measured = 1 if sess.get("end_time") and analytics.session_score(sess) is not None else 0
-        return analytics.event_breakdown(events, measured)
+        return self._breakdown(events, measured)
 
     def _class_names(self, class_id):
         return {s["student_id"]: s["display_name"] for s in self.repo.get_students_in_class(class_id)}
@@ -271,9 +368,12 @@ class SessionManager:
         measured = sum(1 for r in rows if analytics.session_score(r) is not None)
         names = self._class_names(class_id)
         return {
-            "breakdown": analytics.event_breakdown(events, measured),
+            "breakdown": self._breakdown(events, measured),
             "danger_hour": analytics.danger_hour(self._class_rows(self.repo.get_focus_snapshots, class_id)),
-            "watchlist": analytics.watchlist(rows, names),
+            "watchlist": analytics.watchlist(rows, names, threshold=self.config.analytics.watchlist_score_below,
+                                             min_measured=self.config.analytics.watchlist_min_sessions),
+            "watchlist_rule": {"score_below": self.config.analytics.watchlist_score_below,
+                               "min_sessions": self.config.analytics.watchlist_min_sessions},
             "class_sessions": len([c for c in self.repo.get_class_sessions(class_id) if c.get("ended_at")]),
         }
 
@@ -304,7 +404,7 @@ class SessionManager:
             rows = self.repo.get_session_students(class_session_id=cs["id"])
             events = self.repo.get_focus_events(class_session_id=cs["id"])
             summary = analytics.class_session_summary(rows, names)
-            counts = analytics.event_breakdown(events, 1)["counts"]
+            counts = self._breakdown(events, 1)["counts"]
             out.append({
                 "class_session_id": cs["id"], "started_at": cs.get("started_at"), "ended_at": cs.get("ended_at"),
                 "mode": cs.get("mode"), "duration_seconds": self._duration_seconds(cs.get("started_at"), cs.get("ended_at")),
@@ -321,24 +421,28 @@ class SessionManager:
         events = self.repo.get_focus_events(class_session_id=class_session_id)
         students = [{
             "student_id": r["student_id"], "name": names.get(r["student_id"], f"#{r['student_id']}"),
-            "attendance_status": r.get("attendance_status"),
+            "attendance_status": r.get("attendance_status"), "attendance_source": r.get("attendance_source"),
             "average_score": None if analytics.session_score(r) is None else int(round(analytics.session_score(r))),
             "away_count": r.get("away_count") or 0, "away_seconds": int(r.get("away_seconds") or 0),
             "event_counts": r.get("event_counts") or {},
         } for r in rows]
         students.sort(key=lambda x: x["name"])
+        states = self._review_states(events)
         event_rows = [{
+            "event_id": e.get("id"),
             "student_id": e.get("student_id"), "name": names.get(e.get("student_id"), f"#{e.get('student_id')}"),
             "type": analytics.normalize_event_type(e.get("type")) or e.get("type"),
             "start_time": e.get("start_time"), "duration_seconds": e.get("duration_seconds"),
-            "confidence": e.get("confidence"),
+            "confidence": e.get("confidence"), "activity_context": e.get("activity_context"),
+            "interpreted_state": e.get("interpreted_state"),
+            "review_state": states.get(e.get("id"), "UNREVIEWED"),
         } for e in events]
         event_rows.sort(key=lambda e: e.get("start_time") or 0)
         return {
             "class_session_id": class_session_id, "started_at": cs.get("started_at"), "ended_at": cs.get("ended_at"),
             "mode": cs.get("mode"), "duration_seconds": self._duration_seconds(cs.get("started_at"), cs.get("ended_at")),
             "summary": analytics.class_session_summary(rows, names),
-            "breakdown": analytics.event_breakdown(events, 1 if rows else 0),
+            "breakdown": self._breakdown(events, 1 if rows else 0),
             "students": students, "events": event_rows,
         }
 

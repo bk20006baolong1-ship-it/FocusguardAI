@@ -1,5 +1,7 @@
 # PROMPT LOG & MINH CHỨNG PHÁT TRIỂN
 
+**Đội:** iKH Future Makers · **Mã đội:** AI26A0049 · **Thí sinh:** Nguyễn Hoàng Bảo Long, lớp 8/1 - THCS Tây Nha Trang · **Người hướng dẫn:** Phan Tuấn Kiệt, Giám Đốc, Trung tâm tin học iKH
+
 > Prompt Log dùng lịch sử thật do đội cung cấp, không dựng lại nội dung hoặc timestamp.
 
 ## 1. Prompt thực tế đã sử dụng
@@ -31,10 +33,11 @@ https://drive.google.com/drive/folders/1K6HAi9LngnBFuSgdzzg4nP0t6cMwB042
 | SUMMARY.md | Competition hardening |
 | docs/COMPETITION_ARCHITECTURE.md | Identity, behavior, FocusEngine, runtime, realtime, authz |
 | docs/REAL_CAMERA_RESULTS.md | Camera thật, kịch bản PASS, lỗi đã sửa |
-| docs/PRIVACY_AND_AI_SAFETY.md | Sinh trắc, không ghi video, phạm vi sử dụng |
-| .github/workflows/ci.yml | CI compile/import/pytest/JS/security/evaluation |
+| docs/PRIVACY_AND_AI_SAFETY.md | Sinh trắc, mặc định không lưu video, phạm vi sử dụng |
+| scripts/ci_check.sh | Kiểm chứng: compile/import/pytest/JS/security/evaluation/quyền riêng tư báo cáo |
+| docs/BTC_FEEDBACK_CLOSURE.md | Đối chiếu góp ý BTC với mã, test, bằng chứng |
 | docs/UI_UX.md | Hệ thống thiết kế và UX |
-| tests/ | 184 tests trong lần kiểm tra gần nhất |
+| tests/ | 675 test đạt, 27 bỏ qua có lý do trong lần kiểm tra gần nhất |
 | competition/ai-tai-nang-viet-2026/screenshots/ | Ảnh giao diện thật |
 | Git history | Quá trình phát triển, sửa lỗi và kiểm thử |
 

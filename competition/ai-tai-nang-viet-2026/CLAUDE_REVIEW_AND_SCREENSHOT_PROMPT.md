@@ -1,7 +1,7 @@
 # Prompt Claude Code – Audit hồ sơ + chụp UI thật + cập nhật hồ sơ
 
 Bạn đang làm việc trên repository:
-`hoangvan06121982nt-coder/focusguardAI`
+`DKTECHVN/focusAI` (repo chính thức; repo cũ `hoangvan06121982nt-coder/focusguardAI` không còn là nguồn sự thật)
 
 Mục tiêu: kiểm tra **toàn bộ hồ sơ AI Tài Năng Việt 2026 – Bảng A THCS** trong:
 `competition/ai-tai-nang-viet-2026/`
@@ -35,7 +35,8 @@ Sau đó:
 - `docs/COMPETITION_ARCHITECTURE.md`
 - `docs/PRIVACY_AND_AI_SAFETY.md`
 - `docs/REAL_CAMERA_RESULTS.md`
-- `.github/workflows/ci.yml`
+- `scripts/ci_check.sh`, `scripts/firestore_emulator_check.sh` (chạy trực tiếp; không dùng GitHub Actions làm cổng)
+- `docs/BTC_FEEDBACK_CLOSURE.md`
 - implementation thật trong `app.py`, `classroom_ai.py`, `camera_ai.py`, `repository.py`, `focusguard/**`
 - test hiện tại và git history.
 
@@ -47,8 +48,8 @@ Status chỉ dùng: `VERIFIED`, `STALE`, `UNPROVEN`, `WRONG`.
 Không giữ claim `STALE/UNPROVEN/WRONG` trong hồ sơ mà không sửa.
 
 ## C. Các claim đặc biệt phải kiểm tra
-- 184 tests pass / 0 fail / 9 skip.
-- Firestore emulator 6/6.
+- số test pass / fail / skip hiện tại của `bash scripts/ci_check.sh` (chạy lại, không chép số cũ).
+- số test Firestore emulator hiện tại.
 - hardware 3/3.
 - camera thật khoảng 7.5 FPS trên MacBook Air M3.
 - kịch bản camera 1–5, 8, 9 PASS.
@@ -56,7 +57,7 @@ Không giữ claim `STALE/UNPROVEN/WRONG` trong hồ sơ mà không sửa.
 - real-world accuracy = NOT_EVALUATED.
 - không emotion recognition.
 - không gaze tracking.
-- không ghi video.
+- mặc định không lưu video; Evidence Mode tùy chọn, chỉ khung hình đã cắt theo đúng học sinh, tự xóa 24 giờ.
 - chỉ lưu face embedding theo contract hiện tại.
 - client state bị server từ chối.
 - authz theo ownership.

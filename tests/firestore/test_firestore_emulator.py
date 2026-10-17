@@ -135,3 +135,16 @@ def test_full_class_lifecycle_on_firestore(repo):
     analytics = sm.class_analytics(1)
     assert analytics["breakdown"]["counts"]["PHONE"] == 1
     assert sm.class_session_summary(result["class_session_id"], 1)["present"] == 1
+
+
+# ------------------------------------------------ BTC-feedback contract
+# The same contract functions that tests/test_repo_contract.py runs on SQLite.
+import sys as _sys  # noqa: E402
+_sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import repo_contract  # noqa: E402
+
+
+@pytest.mark.parametrize("contract", repo_contract.ALL, ids=lambda f: f.__name__)
+def test_btc_feedback_contract_on_firestore(repo, contract):
+    repo.init_db(seed_demo_accounts=True, demo_password="pw")
+    contract(repo)

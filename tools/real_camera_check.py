@@ -376,6 +376,14 @@ def run(args):
             os.remove(args.db + suffix)
     repo = SQLiteRepository(args.db)
     sm = SessionManager(repo=repo, seed_demo_accounts=True)
+    # Recognition requires ACTIVE consent (server-enforced). The volunteers of
+    # this check consent in person; record it in the throw-away database.
+    from focusguard.authz import Principal
+    operator = Principal(1, "admin")
+    for sid in (STUDENT_A, STUDENT_B):
+        sm.consent.grant(operator, sid, guardian_name="Tình nguyện viên kiểm thử",
+                         guardian_relationship="Tự đồng ý khi tham gia", student_is_adult=True,
+                         scopes={"face_recognition": True, "evaluation": True})
     emb_a, n_a = enroll(recognizer, cap, prompter)
     repo.save_face_embedding(STUDENT_A, json.dumps(emb_a))
     enrolled = {"A": n_a}
@@ -398,7 +406,7 @@ def run(args):
         t_end = time.time() + seconds
         last = time.time()
         while time.time() < t_end:
-            frame_bytes, _, _ = cam.get_frame()
+            frame_bytes, _, _ = cam.get_frame(block=0.5)
             now = time.time()
             fps = 1.0 / max(1e-3, now - last)
             last = now
@@ -446,7 +454,7 @@ def run(args):
     time.sleep(8.0)                                  # no frames: like a stalled/disconnected stream
     status_stall = rt.heartbeat(time.time())
     score_stall = rt.states[STUDENT_A].focus_score
-    cam.cap.release()                                # device closed; get_frame must reopen it
+    cam.reader.request_reconnect()                   # device closed + reopened by the reader thread
     t_resume = time.time()
     loop("S8_after", 8)
     after = [f for f in log["frames"] if f["step"] == "S8_after"]
@@ -473,15 +481,15 @@ def run(args):
     rt2 = sm.start_class(CLASS_ID, mode="classroom")
     before_new = rt2.student_view(STUDENT_A)
     for _ in range(10):
-        cam.get_frame()                               # old pipeline bound to old_cs
+        cam.get_frame(block=0.5)                      # old pipeline bound to old_cs
     after_new = rt2.student_view(STUDENT_A)
     log["end"] = {
         "events_persisted": len(events),
         "open_episodes_after_end": sum(1 for e in events if e.get("end_time") is None),
         "session_students_rows": len(rows), "enrolled": len(rt.states),
         "runtime_cleaned": sm.class_runtime(CLASS_ID) is rt2 and not rt.active,
-        "new_class_clean": before_new["attendance_status"] == "NOT_YET" and before_new["focus_score"] is None,
-        "stale_pipeline_fed_new_runtime": after_new["attendance_status"] != "NOT_YET",
+        "new_class_clean": before_new["attendance_status"] == "NOT_SEEN" and before_new["focus_score"] is None,
+        "stale_pipeline_fed_new_runtime": after_new["attendance_status"] != "NOT_SEEN",
         "summary": {k: v for k, v in sm.class_session_summary(old_cs, CLASS_ID).items() if k != "top_students"},
     }
     sm.end_class(CLASS_ID)

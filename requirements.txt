@@ -5,6 +5,9 @@ eventlet==0.41.0
 
 # Computer Vision & AI Models
 opencv-python==4.13.0.92
+# mediapipe pulls opencv-contrib-python (unpinned -> it would overwrite cv2 with a different
+# OpenCV major). Pin it to the same version so both wheels ship identical cv2 files.
+opencv-contrib-python==4.13.0.92
 mediapipe==0.10.35
 numpy==2.4.6
 ultralytics==8.4.51
@@ -16,3 +19,6 @@ onnxruntime==1.27.0
 firebase-admin==7.4.0
 google-cloud-firestore==2.27.0
 google-auth==2.55.0
+
+# Camera credential encryption at rest (FG_CAMERA_CREDENTIAL_KEY)
+cryptography==50.0.2

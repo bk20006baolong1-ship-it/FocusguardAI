@@ -8,6 +8,16 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 os.environ.setdefault("DATABASE_TYPE", "sqlite")
+# Evaluation logs and evidence clips written by tests never land in the repo.
+import tempfile  # noqa: E402
+_TMP = tempfile.mkdtemp(prefix="focusguard-tests-")
+os.environ.setdefault("EVALUATION_PRIVATE_DIR", os.path.join(_TMP, "evaluation-private"))
+os.environ.setdefault("EVENT_EVIDENCE_DIR", os.path.join(_TMP, "evidence"))
+# Development camera credential key file of the test run (never the repository's .focusguard/).
+os.environ.setdefault("FG_CAMERA_KEY_FILE", os.path.join(_TMP, "camera_credential.key"))
+# Deterministic camera-network policy for the test run (independent of this machine's interfaces):
+# the synthetic cameras of the tests live in 192.168.0.0/16. Policy tests build their own NetGuard.
+os.environ.setdefault("FG_CAMERA_ALLOWED_NETWORKS", "192.168.0.0/16")
 
 from repository import SQLiteRepository  # noqa: E402
 from session_manager import SessionManager  # noqa: E402
@@ -69,3 +79,42 @@ def login_as(app):
     def _login(username, password="123"):
         return login(app, username, password)
     return _login
+
+
+def run_class_with_events(manager, clock, *, class_id=1, student_id=3, phone_seconds=6.0, head_seconds=5.0,
+                          context=None, fps=5.0, end=True):
+    """Start a classroom session, feed one student a PHONE then a HEAD_AWAY
+    episode through the real SessionRuntime, and (optionally) end the class.
+    Returns (runtime, events_of_that_class_session)."""
+    from focusguard.behavior import Observation
+    rt = manager.start_class(class_id, mode="classroom", started_by=2)
+    if context:
+        manager.set_activity_context(class_id, context)
+
+    def feed(seconds, **kw):
+        for _ in range(int(seconds * fps)):
+            t = clock.advance(1.0 / fps)
+            base = dict(ear=0.30, yaw=0.0, pitch=0.0, phone_confidence=None)
+            base.update(kw)
+            rt.process_frame(t, {student_id: Observation(timestamp=t, visible=True, face_visible=True, **base)})
+    feed(3)
+    feed(phone_seconds, phone_confidence=0.8)
+    feed(3)
+    feed(head_seconds, yaw=45.0)
+    feed(3)
+    if end:
+        manager.end_class(class_id)
+    return rt, manager.repo.get_focus_events(class_session_id=rt.class_session_id)
+
+
+def add_teacher(repo, username="teacher2", class_id=2):
+    ok, _ = repo.create_user(username, "123", "Cô Lan", "teacher", class_id)
+    assert ok
+    return repo.get_user_by_username(username)["id"]
+
+
+def grant_consent(manager, student_id, **scopes):
+    from focusguard.authz import Principal
+    scopes = scopes or {"face_recognition": True}
+    return manager.consent.grant(Principal(1, "admin"), student_id, guardian_name="Phụ huynh",
+                                 guardian_relationship="Mẹ", scopes=scopes)

@@ -90,6 +90,7 @@ class _SignalTracker:
     conf_sum: float = 0.0
     conf_n: int = 0
     episode: Optional[BehaviorEpisode] = None
+    directions: Dict[str, int] = field(default_factory=dict)   # HEAD_AWAY only
 
     def reset_run(self):
         self.raw_since = None
@@ -98,6 +99,12 @@ class _SignalTracker:
         self.frames_total = 0
         self.conf_sum = 0.0
         self.conf_n = 0
+        self.directions = {}
+
+    def dominant_direction(self) -> Optional[str]:
+        if not self.directions:
+            return None
+        return max(sorted(self.directions), key=lambda d: self.directions[d])
 
 
 @dataclass
@@ -125,157 +132,75 @@ class BehaviorAnalyzer:
         self._ear_hist = deque()                 # (timestamp, ear) of open-eye samples
         self.ear_baseline: Optional[float] = None
         self.ear_closed_threshold: Optional[float] = None
-        self.last_valid_ear: Optional[float] = None
-        self.last_valid_ear_at: Optional[float] = None
-        self.last_eye_closed: bool = False
-
-        self._pose_hist = deque()                # (timestamp, yaw, pitch) of resting pose samples
-        self.yaw_baseline: Optional[float] = None
-        self.pitch_baseline: Optional[float] = None
-        self.last_valid_yaw: Optional[float] = None
-        self.last_valid_pitch: Optional[float] = None
-        self.last_pose_at: Optional[float] = None
-        self.last_head_away: bool = False
-        self.face_missing_since: Optional[float] = None
-        self.last_obs_at: Optional[float] = None
-        self.last_dt: float = 0.0
+        self._last_head_direction: Optional[str] = None
 
     # ---------------------------------------------------------------- signals
     def _eyes_closed(self, obs: Observation) -> bool:
         """Eye closure relative to THIS student's own open-eye EAR.
 
-        Uses adaptive EAR baseline while ensuring the threshold has a floor
-        (ear_min_closed_threshold) so that prolonged eye closure (15-20s)
-        cannot drag down or evade the detector.
-        Missing landmarks (obs.ear is None) within short tolerance are handled
-        gracefully without immediately treating them as open eyes or closed eyes.
+        Until enough open-eye samples exist the eyes count as "not measured"
+        (never as closed), so a student whose normal EAR is low is not flagged
+        drowsy during warm-up. Samples taken while the eyes look closed are not
+        added to the baseline, so a long closure cannot drag it down.
         """
         c = self.config
         if obs.ear is None:
-            # Short tolerance: if within tolerance, hold previous eye closure state
-            if self.last_valid_ear_at is not None and (obs.timestamp - self.last_valid_ear_at) <= c.gap_tolerance_seconds:
-                return self.last_eye_closed
             return False
-
         hist = self._ear_hist
         while hist and obs.timestamp - hist[0][0] > c.ear_baseline_window_seconds:
             hist.popleft()
-
+        closed = False
         ready = (len(hist) >= c.ear_baseline_min_samples
                  and hist[-1][0] - hist[0][0] >= c.ear_baseline_min_seconds)
         if ready:
             vals = sorted(e for _, e in hist)
             self.ear_baseline = vals[int(c.ear_baseline_percentile * (len(vals) - 1))]
-            adaptive = c.ear_closed_ratio * self.ear_baseline
-            self.ear_closed_threshold = min(c.ear_threshold, max(c.ear_min_closed_threshold, adaptive))
-        elif self.ear_closed_threshold is None:
-            # Fallback before baseline warm-up: standard threshold clamped to floor
-            self.ear_closed_threshold = min(c.ear_threshold, max(c.ear_min_closed_threshold, c.ear_threshold * c.ear_closed_ratio))
-
-        closed = obs.ear < self.ear_closed_threshold
-        # Only plausible open-eye samples (> floor) are appended to baseline
-        if not closed and obs.ear >= c.ear_min_closed_threshold:
+            self.ear_closed_threshold = min(c.ear_threshold, c.ear_closed_ratio * self.ear_baseline)
+        if self.ear_closed_threshold is not None:
+            # Keep the last baseline when recent open-eye samples aged out
+            # (e.g. eyes closed longer than the window).
+            closed = obs.ear < self.ear_closed_threshold
+        if not closed:
             hist.append((obs.timestamp, obs.ear))
-
-        self.last_valid_ear = obs.ear
-        self.last_valid_ear_at = obs.timestamp
-        self.last_eye_closed = closed
         return closed
-
-    def _head_away(self, obs: Observation) -> bool:
-        """Detect head turning away or bowing head down (cúi đầu).
-
-        Compares yaw and pitch with student's normal resting baseline.
-        When face landmarks are lost but body is still tracked (quay mặt ra sau),
-        uses prior transition evidence (heading outward or already turned)
-        to sustain HEAD_AWAY; does not invent HEAD_AWAY on simple occlusion.
-        """
-        c = self.config
-        now = obs.timestamp
-
-        # Case A: Face landmarks are visible and measured
-        if obs.face_visible is not False and (obs.yaw is not None or obs.pitch is not None):
-            self.face_missing_since = None
-            # Update resting pose baseline when head is near center
-            if obs.yaw is not None and obs.pitch is not None:
-                if abs(obs.yaw) < 15.0 and abs(obs.pitch) < 18.0:
-                    self._pose_hist.append((now, obs.yaw, obs.pitch))
-                    while self._pose_hist and now - self._pose_hist[0][0] > 60.0:
-                        self._pose_hist.popleft()
-                    if len(self._pose_hist) >= 10 and self._pose_hist[-1][0] - self._pose_hist[0][0] >= 2.0:
-                        yaws = sorted(y for _, y, _ in self._pose_hist)
-                        pitches = sorted(p for _, _, p in self._pose_hist)
-                        self.yaw_baseline = yaws[len(yaws) // 2]
-                        self.pitch_baseline = pitches[len(pitches) // 2]
-
-            base_yaw = self.yaw_baseline if self.yaw_baseline is not None else 0.0
-            base_pitch = self.pitch_baseline if self.pitch_baseline is not None else 0.0
-            delta_yaw = (obs.yaw - base_yaw) if obs.yaw is not None else 0.0
-            delta_pitch = (obs.pitch - base_pitch) if obs.pitch is not None else 0.0
-
-            is_away = False
-            # Quay đầu trái / phải (kiểm tra cả delta so với baseline và góc tuyệt đối)
-            if obs.yaw is not None:
-                if abs(delta_yaw) > c.yaw_limit_deg or abs(obs.yaw) > c.yaw_limit_deg:
-                    is_away = True
-            # Cúi đầu xuống / ngẩng đầu lên / lệch pitch
-            if obs.pitch is not None:
-                # In MediaPipe Face Landmarker decomposed by cv2.RQDecomp3x3:
-                # Bowing head down (cúi đầu) increases pitch (delta_pitch > 0),
-                # Tilting head up (ngẩng đầu) decreases pitch (delta_pitch < 0).
-                # Support both positive-down (MediaPipe) and negative-down conventions.
-                if delta_pitch > c.pitch_down_limit_deg or delta_pitch < -c.pitch_down_limit_deg:
-                    is_away = True
-                if delta_pitch < -c.pitch_up_limit_deg or delta_pitch > c.pitch_up_limit_deg:
-                    is_away = True
-                if abs(delta_pitch) > c.pitch_limit_deg:
-                    is_away = True
-
-            if obs.yaw is not None:
-                self.last_valid_yaw = obs.yaw
-            if obs.pitch is not None:
-                self.last_valid_pitch = obs.pitch
-            self.last_pose_at = now
-            self.last_head_away = is_away
-            return is_away
-
-        # Case B: Face landmarks not visible (e.g. turned head completely around or bowed head deeply)
-        if obs.visible:
-            if self.face_missing_since is None:
-                self.face_missing_since = now
-            base_yaw = self.yaw_baseline if self.yaw_baseline is not None else 0.0
-            base_pitch = self.pitch_baseline if self.pitch_baseline is not None else 0.0
-            last_delta_yaw = (self.last_valid_yaw - base_yaw) if self.last_valid_yaw is not None else 0.0
-            last_delta_pitch = (self.last_valid_pitch - base_pitch) if self.last_valid_pitch is not None else 0.0
-
-            # Evidence 1: was the head already turned/bowed or clearly heading outward before losing landmarks?
-            heading_away_before = (
-                self.last_head_away
-                or abs(last_delta_yaw) >= (c.yaw_limit_deg - 5.0)
-                or abs(last_delta_pitch) >= (c.pitch_down_limit_deg - 5.0)
-            )
-            if heading_away_before:
-                return True
-
-            # If no landmark and no prior turn evidence: within short tolerance hold state
-            if self.last_pose_at is not None and (now - self.last_pose_at) <= c.gap_tolerance_seconds:
-                return self.last_head_away
-            return False
-
-        # Not visible at all
-        return False
 
     def raw_signals(self, obs: Observation) -> Dict[str, Tuple[bool, Optional[float]]]:
         """Threshold raw measurements. Returns ``{kind: (on, confidence)}``."""
         c = self.config
         phone_on = obs.phone_confidence is not None and obs.phone_confidence >= c.phone_min_confidence
         eyes_closed = self._eyes_closed(obs)
-        head_away = self._head_away(obs)
+        head_away = False
+        self._last_head_direction = None
+        dyaw = None if obs.yaw is None else obs.yaw - c.yaw_center_deg
+        dpitch = None if obs.pitch is None else obs.pitch - c.pitch_center_deg
+        if dyaw is not None and abs(dyaw) > c.yaw_limit_deg:
+            head_away = True
+        if dpitch is not None and abs(dpitch) > c.pitch_limit_deg:
+            head_away = True
+        if head_away:
+            self._last_head_direction = self._head_direction(dyaw, dpitch)
         return {
             PHONE: (phone_on, obs.phone_confidence if phone_on else None),
             DROWSY: (eyes_closed, None),
             HEAD_AWAY: (head_away, None),
         }
+
+    def _head_direction(self, dyaw, dpitch) -> str:
+        """UP / DOWN / LEFT / RIGHT: the axis that exceeds its limit the most.
+
+        Only labels the episode for the context policy (e.g. head DOWN while
+        writing); it never decides whether HEAD_AWAY happened."""
+        c = self.config
+        ry = abs(dyaw) / c.yaw_limit_deg if dyaw is not None and c.yaw_limit_deg > 0 else 0.0
+        rp = abs(dpitch) / c.pitch_limit_deg if dpitch is not None and c.pitch_limit_deg > 0 else 0.0
+        if rp >= ry and dpitch is not None:
+            down = dpitch > 0 if c.pitch_down_positive else dpitch < 0
+            return "DOWN" if down else "UP"
+        return "RIGHT" if (dyaw or 0) > 0 else "LEFT"
+
+    def head_direction(self) -> Optional[str]:
+        """Dominant direction of the current HEAD_AWAY run (None if none)."""
+        return self._signals[HEAD_AWAY].dominant_direction()
 
     def _min_seconds(self, kind: str) -> float:
         c = self.config
@@ -286,11 +211,10 @@ class BehaviorAnalyzer:
     def update(self, obs: Observation) -> BehaviorUpdate:
         out = BehaviorUpdate()
         now = obs.timestamp
-        if self.last_obs_at is not None:
-            self.last_dt = min(3.0, max(0.01, now - self.last_obs_at))
-        self.last_obs_at = now
         if obs.visible:
             self._on_visible(obs, now, out)
+        elif (obs.extra or {}).get("identity_unresolved"):
+            self._on_unresolved(now, out)
         else:
             self._on_not_visible(now, out)
         out.focus_state = self.focus_state
@@ -327,11 +251,7 @@ class BehaviorAnalyzer:
                 self.focus_state = rs.FOCUS_UNKNOWN
 
     def _gap(self, kind: str) -> float:
-        base = self.config.phone_gap_tolerance_seconds if kind == PHONE else self.config.gap_tolerance_seconds
-        # Dynamic gap tolerance: scales with actual measured frame interval (dt * 2.2)
-        # to prevent timer resets on CPU when inference latency is slow or variable.
-        dt = getattr(self, "last_dt", 0.0)
-        return max(base, min(3.0, dt * 2.2))
+        return self.config.phone_gap_tolerance_seconds if kind == PHONE else self.config.gap_tolerance_seconds
 
     def _phone_active(self, now: float) -> bool:
         t = self._signals[PHONE]
@@ -348,6 +268,8 @@ class BehaviorAnalyzer:
                 t.reset_run()
                 t.raw_since = now
             t.last_true = now
+            if t.kind == HEAD_AWAY and self._last_head_direction:
+                t.directions[self._last_head_direction] = t.directions.get(self._last_head_direction, 0) + 1
             t.frames_true += 1
             t.frames_total += 1
             if conf is not None:
@@ -384,6 +306,9 @@ class BehaviorAnalyzer:
             ep.confidence = consistency
         ep.metadata["frames_on"] = t.frames_true
         ep.metadata["frames_total"] = t.frames_total
+        if t.kind == HEAD_AWAY and t.directions:
+            ep.metadata["direction"] = t.dominant_direction()
+            ep.metadata["direction_frames"] = dict(t.directions)
         out.ended.append(ep)
         t.episode = None
 
@@ -414,6 +339,25 @@ class BehaviorAnalyzer:
             self.visibility_status = rs.VIS_TEMPORARILY_NOT_VISIBLE
             self.focus_state = rs.FOCUS_TEMPORARILY_NOT_VISIBLE
 
+    def _on_unresolved(self, now: float, out: BehaviorUpdate):
+        """Not confirmed on any track, but an unidentified person is in the frame who could be
+        this student. Signals end (nothing is measured), the AWAY timer does NOT run and no
+        AWAY episode starts; one already running (the student had left before) continues."""
+        for t in self._signals.values():
+            if t.episode is not None:
+                self._end_signal_episode(t, out)
+            t.reset_run()
+        if self._away_episode is not None:
+            self.visibility_status = rs.VIS_AWAY
+            self.focus_state = rs.FOCUS_AWAY
+            return
+        self._not_visible_since = None
+        if not self._ever_visible:
+            self.visibility_status = rs.VIS_NOT_SEEN
+        else:
+            self.visibility_status = rs.VIS_IDENTITY_UNRESOLVED
+        self.focus_state = rs.FOCUS_UNKNOWN
+
     @property
     def not_visible_since(self) -> Optional[float]:
         return self._not_visible_since
@@ -423,6 +367,17 @@ class BehaviorAnalyzer:
         if self._away_episode is not None:
             eps.append(self._away_episode)
         return eps
+
+    def suspend(self, last_real: float) -> List[BehaviorEpisode]:
+        """The camera signal was lost (no frames). End every open episode at the last
+        real observation and forget the not-visible timer: time without frames is
+        unknown, never counted as AWAY or any other behaviour. After frames resume,
+        a student who is still not visible starts a NEW not-visible run."""
+        ended = self.close(last_real)
+        for ep in ended:
+            ep.metadata["ended_by"] = "NO_CAMERA_SIGNAL"
+        self._not_visible_since = None
+        return ended
 
     def close(self, now: float) -> List[BehaviorEpisode]:
         """End every open episode at ``now`` (class ended / runtime shutdown)."""

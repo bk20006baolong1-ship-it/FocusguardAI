@@ -78,6 +78,9 @@ def build_flask_config(env_map=None):
         "MAX_CONTENT_LENGTH": 16 * 1024 * 1024,
         # None -> Flask-SocketIO same-origin policy; list -> explicit allow-list.
         "SOCKETIO_CORS_ORIGINS": origins or None,
+        # Number of trusted reverse proxies in front of the app (0 = none). With a proxy, set it to 1 so the
+        # CSRF same-origin check (and url_for) see the public host from X-Forwarded-Host / X-Forwarded-Proto.
+        "TRUST_PROXY": max(0, int(env_value(env_map, "FG_TRUST_PROXY", "0") or 0)),
         "SEED_DEMO_ACCOUNTS": (not prod) and env_map.get("SEED_DEMO_ACCOUNTS", "true").lower() == "true",
     }
 
@@ -108,3 +111,24 @@ def verify_password(stored, provided):
             return False, False
     ok = secrets.compare_digest(str(stored).encode("utf-8"), str(provided).encode("utf-8"))
     return ok, ok
+
+
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def cross_site_write(method: str, host: str, origin: str = None, referer: str = None, trusted=()) -> bool:
+    """CSRF guard (OWASP "verify origin"): True when a state-changing request was
+    sent by a page of ANOTHER site. Browsers attach ``Origin`` (or at least
+    ``Referer``) to cross-site POSTs; a request with neither comes from a
+    non-browser client (CLI, tests) and cannot ride a user's cookie."""
+    if (method or "").upper() in SAFE_METHODS:
+        return False
+    from urllib.parse import urlsplit
+    source = origin if origin else referer
+    if not source:
+        return False
+    if source == "null":
+        return True        # sandboxed iframe / file: page
+    netloc = urlsplit(source).netloc.lower()
+    allowed = {(host or "").lower()} | {urlsplit(t).netloc.lower() or t.lower() for t in trusted or ()}
+    return netloc not in allowed

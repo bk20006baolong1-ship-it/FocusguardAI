@@ -19,6 +19,19 @@ after temporal evidence:
   ``recovery_window_seconds`` so a re-assigned tracker id can recover quickly.
 
 Anything short of that evidence keeps the track ``UNKNOWN`` / ``UNCERTAIN``.
+
+Multi-template gallery: a student may have several face templates
+(focusguard/face_profiles.py); the per-student score is the best template, and
+with >= 2 templates one odd template cannot carry a match alone (the second
+best must agree within ``template_agreement``). Threshold, margin between
+STUDENTS, temporal confirmation and one-student-one-track still apply.
+
+Provenance (``source``) is kept apart from the status: AUTO_FACE,
+AUTO_RECOVERED, TEACHER_TAG, TEACHER_CORRECTED. A teacher binding
+(:meth:`IdentityManager.teacher_bind`) is the authority for the session: face
+evidence never switches it; persistent contradiction only raises
+``review_required`` for the teacher to resolve. A student the teacher removed
+from a track is never auto-bound to that track again.
 """
 import copy
 from dataclasses import dataclass, field
@@ -34,6 +47,13 @@ CANDIDATE = "CANDIDATE"      # accumulating consecutive evidence
 CONFIRMED = "CONFIRMED"      # locked to a student_id
 UNCERTAIN = "UNCERTAIN"      # evidence ambiguous or contradicted, lock dropped
 CONFLICT = "CONFLICT"        # matched a student already bound to another live track
+
+# Identity provenance
+SRC_AUTO_FACE = "AUTO_FACE"
+SRC_AUTO_RECOVERED = "AUTO_RECOVERED"
+SRC_TEACHER_TAG = "TEACHER_TAG"
+SRC_TEACHER_CORRECTED = "TEACHER_CORRECTED"
+TEACHER_SOURCES = (SRC_TEACHER_TAG, SRC_TEACHER_CORRECTED)
 
 # Per-recognition outcomes
 MATCH = "MATCH"
@@ -91,12 +111,28 @@ class TrackIdentity:
     last_seen: Optional[float] = None
     confirmed_at: Optional[float] = None
     last_outcome: str = NO_FACE
+    source: Optional[str] = None                # provenance of the current binding
+    teacher_locked: bool = False                # teacher tag / correction: face evidence never switches it
+    confirmed_by: Optional[int] = None
+    review_required: bool = False               # contradicting evidence on a teacher binding
+    rejected_students: set = field(default_factory=set)   # teacher removed them from this track
+    suggestion_id: Optional[int] = None         # best accepted match while not locked (AI suggestion)
+    suggestion_similarity: float = 0.0
+    suggestion_margin: float = 0.0
+    restored: bool = False                      # teacher binding continued on a new track by seat continuity
+
+    @property
+    def needs_review(self) -> bool:
+        return self.review_required
 
     def snapshot(self) -> dict:
         return {
             "track_id": self.track_id,
             "status": self.status,
             "student_id": self.student_id,
+            "source": self.source,
+            "teacher_locked": self.teacher_locked,
+            "review_required": self.review_required,
             "confidence": round(float(self.confidence), 4),
             "margin": round(float(self.margin), 4),
             "candidate_id": self.candidate_id,
@@ -132,25 +168,48 @@ class IdentityManager:
 
     # ------------------------------------------------------------------ gallery
     def set_gallery(self, gallery: Dict[int, Sequence[float]]):
+        """``{student_id: embedding}`` or ``{student_id: [embedding, ...]}`` (multi-template)."""
         ids, rows = [], []
         for sid, emb in gallery.items():
-            vec = _normalize(emb)
-            if vec is None:
-                continue
-            if rows and vec.shape != rows[0].shape:
-                continue
-            ids.append(int(sid))
-            rows.append(vec)
+            arr = np.asarray(emb, dtype=np.float64) if emb is not None else None
+            vectors = [emb] if arr is None or arr.ndim <= 1 else list(emb)
+            for e in vectors:
+                vec = _normalize(e)
+                if vec is None:
+                    continue
+                if rows and vec.shape != rows[0].shape:
+                    continue
+                ids.append(int(sid))
+                rows.append(vec)
         # Swap ids+matrix together so a concurrent match() never sees a mix.
         self._gallery = (ids, np.vstack(rows) if rows else None)
-        # Students removed from the gallery lose any binding.
+        # Students removed from the gallery lose an AUTOMATIC binding; a teacher binding is
+        # session identity (no biometric data needed) and stays.
+        present = set(self._gallery[0])
         for sid in list(self._owner):
-            if sid not in self._gallery[0]:
+            t = self.tracks.get(self._owner[sid])
+            if sid not in present and not (t is not None and t.teacher_locked):
                 self._release(self._owner[sid], reason="gallery_removed", now=None)
 
     @property
     def gallery_size(self) -> int:
-        return len(self._gallery[0])
+        return len(set(self._gallery[0]))
+
+    def student_scores(self, vec) -> Dict[int, float]:
+        """Per-student similarity over that student's templates (see module docstring)."""
+        gallery_ids, gallery_mat = self._gallery
+        sims = gallery_mat @ vec
+        per: Dict[int, List[float]] = {}
+        for sid, s in zip(gallery_ids, sims):
+            per.setdefault(sid, []).append(float(s))
+        out = {}
+        for sid, values in per.items():
+            values.sort(reverse=True)
+            best = values[0]
+            if len(values) >= 2 and values[1] < best - self.config.template_agreement:
+                best = (values[0] + values[1]) / 2.0
+            out[sid] = best
+        return out
 
     def match(self, embedding) -> MatchResult:
         vec = _normalize(embedding)
@@ -159,13 +218,10 @@ class IdentityManager:
         gallery_ids, gallery_mat = self._gallery
         if gallery_mat is None or vec.shape[0] != gallery_mat.shape[1]:
             return MatchResult(NO_MATCH)
-        sims = gallery_mat @ vec
-        order = np.argsort(-sims)
-        best_i = int(order[0])
-        best_sim = float(sims[best_i])
-        second_sim = float(sims[int(order[1])]) if len(order) > 1 else -1.0
-        second_id = gallery_ids[int(order[1])] if len(order) > 1 else None
-        res = MatchResult(NO_MATCH, gallery_ids[best_i], best_sim, second_id, max(second_sim, 0.0))
+        scores = sorted(self.student_scores(vec).items(), key=lambda kv: -kv[1])
+        best_id, best_sim = scores[0]
+        second_id, second_sim = (scores[1] if len(scores) > 1 else (None, -1.0))
+        res = MatchResult(NO_MATCH, best_id, best_sim, second_id, max(second_sim, 0.0))
         if best_sim < self.config.similarity_threshold:
             res.outcome = NO_MATCH
         elif best_sim - max(second_sim, 0.0) < self.config.min_margin:
@@ -253,6 +309,22 @@ class IdentityManager:
             t.confidence = m.best_similarity
             t.margin = m.margin
             return
+        if t.teacher_locked:
+            # Teacher authority: no face evidence switches or releases this binding. Another
+            # enrolled student matching clearly and persistently only asks the teacher to review.
+            # A student the teacher already rejected for this track (correction) is not new evidence.
+            if accepted is None or accepted in t.rejected_students:
+                return
+            if t.contradict_count == 0:
+                t.contradict_since = now
+            t.contradict_count += 1
+            if (not t.review_required and t.contradict_count >= self.config.teacher_review_consecutive
+                    and now - (t.contradict_since if t.contradict_since is not None else now) >= self.config.teacher_review_min_seconds):
+                t.review_required = True
+                self.events.append(IdentityEvent("REVIEW_REQUIRED", t.track_id, t.student_id, now,
+                                                  {"contradicting_student": accepted,
+                                                   "similarity": round(m.best_similarity, 4)}))
+            return
         clear_non_match = (m.outcome == NO_MATCH and
                            m.best_similarity < self.config.similarity_threshold - self.config.min_margin)
         if accepted is None:
@@ -273,7 +345,7 @@ class IdentityManager:
             t.contradict_since = now
         t.contradict_count += 1
         if (t.contradict_count >= self.config.unlock_consecutive
-                and now - (t.contradict_since or now) >= self.config.unlock_min_seconds):
+                and now - (t.contradict_since if t.contradict_since is not None else now) >= self.config.unlock_min_seconds):
             released = t.student_id
             self._release(t.track_id, reason="contradicted", now=now)
             self._cooldown_until[released] = now + self.config.conflict_cooldown_seconds
@@ -284,8 +356,15 @@ class IdentityManager:
 
     def _observe_unlocked(self, t: TrackIdentity, m: MatchResult, now: float):
         accepted = m.accepted_id
+        if accepted is not None and accepted in t.rejected_students:
+            accepted = None                       # the teacher said this track is NOT that student
+            m = MatchResult(AMBIGUOUS, m.best_id, m.best_similarity, m.second_id, m.second_similarity)
         t.confidence = m.best_similarity if m.outcome != NO_FACE else t.confidence
         t.margin = m.margin if m.outcome != NO_FACE else t.margin
+        if m.outcome != NO_FACE:
+            t.suggestion_id = accepted
+            t.suggestion_similarity = m.best_similarity if accepted is not None else 0.0
+            t.suggestion_margin = m.margin if accepted is not None else 0.0
 
         if m.outcome == NO_FACE:
             return  # no evidence either way; streak neither grows nor breaks
@@ -318,10 +397,18 @@ class IdentityManager:
             # This very track was confirmed for this student moments ago and
             # only lost it to a duplicate id of the same person.
             needed, min_secs, recovering = 1, 0.0, True
-        if t.candidate_count < needed or (now - (t.candidate_since or now)) < min_secs:
+        if t.candidate_count < needed or (now - (t.candidate_since if t.candidate_since is not None else now)) < min_secs:
             return
 
         owner = self._owner.get(accepted)
+        owner_t = self.tracks.get(owner) if owner is not None else None
+        if owner_t is not None and owner_t.teacher_locked and owner != t.track_id:
+            # The teacher bound this student to another track: face evidence cannot take it.
+            if owner in getattr(self, "_present", ()) and was_conflict_owner != owner:
+                self.events.append(IdentityEvent("CONFLICT", t.track_id, accepted, now, {"owner_track": owner}))
+            t.status = CONFLICT
+            t.conflict_with_track = owner
+            return
         if owner is not None and owner != t.track_id:
             # The owner blocks this claim only while it is visible in THIS
             # frame. Real run: the tracker kept two ids for one person and
@@ -367,6 +454,10 @@ class IdentityManager:
         t.candidate_id = None
         t.candidate_count = 0
         t.candidate_since = None
+        t.source = SRC_AUTO_RECOVERED if recovered else SRC_AUTO_FACE
+        t.teacher_locked = False
+        t.review_required = False
+        t.confirmed_by = None
         self._owner[student_id] = t.track_id
         self._recently_lost.pop(student_id, None)
         self._cooldown_until.pop(student_id, None)
@@ -374,6 +465,96 @@ class IdentityManager:
                                           t.track_id, student_id, now,
                                           {"similarity": round(m.best_similarity, 4),
                                            "margin": round(m.margin, 4)}))
+
+    # ------------------------------------------------------- teacher authority
+    def teacher_bind(self, track_id: int, student_id: int, now: float, by=None) -> dict:
+        """Teacher tags ``track_id`` as ``student_id`` (session identity, immediate).
+
+        Releases whatever the student or the track was bound to before. Returns
+        ``{"source", "previous_student", "displaced_track"}``; ``source`` is
+        TEACHER_CORRECTED when the track carried another student, else TEACHER_TAG."""
+        tid, sid = int(track_id), int(student_id)
+        t = self.tracks.get(tid)
+        if t is None:
+            raise KeyError("unknown track")
+        previous = t.student_id if t.status == CONFIRMED else None
+        displaced = None
+        owner = self._owner.get(sid)
+        if owner is not None and owner != tid:
+            displaced = owner
+            self._release(owner, reason="teacher_reassigned", now=now)
+            other = self.tracks.get(owner)
+            if other is not None:
+                other.teacher_locked = False
+                other.rejected_students.add(sid)
+        if previous is not None and previous != sid:
+            self._release(tid, reason="teacher_corrected", now=now)
+            t.rejected_students.add(previous)
+        source = SRC_TEACHER_CORRECTED if (previous is not None and previous != sid) else SRC_TEACHER_TAG
+        t.rejected_students.discard(sid)
+        t.status = CONFIRMED
+        t.student_id = sid
+        t.source = source if not (previous == sid and t.source in TEACHER_SOURCES) else t.source
+        t.teacher_locked = True
+        t.review_required = False
+        t.confirmed_by = by
+        t.confirmed_at = now
+        t.contradict_count, t.contradict_since, t.stranger_since = 0, None, None
+        t.candidate_id, t.candidate_count, t.candidate_since = None, 0, None
+        t.conflict_with_track = None
+        t.restored = False
+        self._owner[sid] = tid
+        self._recently_lost.pop(sid, None)
+        self._cooldown_until.pop(sid, None)
+        self.events.append(IdentityEvent("TEACHER_" + ("CORRECTED" if source == SRC_TEACHER_CORRECTED else "TAG"),
+                                          tid, sid, now, {"previous_student": previous, "displaced_track": displaced}))
+        return {"source": t.source, "previous_student": previous, "displaced_track": displaced}
+
+    def restore_bind(self, track_id: int, student_id: int, now: float) -> None:
+        """Continue a teacher binding (the camera pipeline / tracker lost its track) on ``track_id``,
+        decided by the session coordinator on position continuity — never on face evidence of a
+        student without consent. Like a teacher binding it is locked (face evidence can only ask
+        for review), its provenance is AUTO_RECOVERED + ``restored``. Raises ValueError if the
+        track already carries an identity or the student is bound elsewhere (one student, one track)."""
+        tid, sid = int(track_id), int(student_id)
+        t = self.tracks.get(tid)
+        if t is None:
+            raise KeyError("unknown track")
+        if (t.status == CONFIRMED and t.student_id is not None) or sid in t.rejected_students:
+            raise ValueError("track not available")
+        owner = self._owner.get(sid)
+        if owner is not None and owner != tid:
+            raise ValueError("student bound elsewhere")
+        t.status = CONFIRMED
+        t.student_id = sid
+        t.source = SRC_AUTO_RECOVERED
+        t.restored = True
+        t.teacher_locked = True
+        t.review_required = False
+        t.confirmed_by = None
+        t.confirmed_at = now
+        t.confidence, t.margin = 0.0, 0.0
+        t.contradict_count, t.contradict_since, t.stranger_since = 0, None, None
+        t.candidate_id, t.candidate_count, t.candidate_since = None, 0, None
+        t.conflict_with_track = None
+        self._owner[sid] = tid
+        self._recently_lost.pop(sid, None)
+        self._cooldown_until.pop(sid, None)
+        self.events.append(IdentityEvent("RESTORED", tid, sid, now, {"method": "SEAT_CONTINUITY"}))
+
+    def teacher_unbind(self, track_id: int, now: float) -> Optional[int]:
+        """Teacher removes the identity of a track; that student is never auto-bound to it again."""
+        t = self.tracks.get(int(track_id))
+        if t is None or t.student_id is None:
+            return None
+        sid = t.student_id
+        self._release(t.track_id, reason="teacher_removed", now=now)
+        t.rejected_students.add(sid)
+        t.teacher_locked = False
+        t.review_required = False
+        t.source = None
+        t.status = UNKNOWN
+        return sid
 
     def _release(self, track_id: int, reason: str, now: Optional[float]):
         t = self.tracks.get(track_id)
@@ -385,6 +566,9 @@ class IdentityManager:
         t.student_id = None
         if t.status == CONFIRMED:
             t.status = UNCERTAIN
+        t.teacher_locked = False
+        t.review_required = False
+        t.restored = False
         t.contradict_count = 0
         self.events.append(IdentityEvent("RELEASED", track_id, sid, now if now is not None else 0.0,
                                           {"reason": reason}))
