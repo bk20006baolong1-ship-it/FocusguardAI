@@ -135,8 +135,35 @@ class WebcamSource(_CvSource):
     def open(self):
         self.close()
         self.state = H.CONNECTING
+        if os.name == "nt" and self._capture_factory is None:
+            cap = None
+            try:
+                import cv2
+                cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
+                if cap.isOpened():
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    ok, test_frame = cap.read()
+                    if ok and test_frame is not None and getattr(test_frame, "size", 0) > 0:
+                        self.cap = cap
+                        self._pending = test_frame
+                        self._read_props()
+                        self.state = H.CONNECTED
+                        return True
+                    cap.release()
+            except Exception:
+                if cap is not None:
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
         try:
             self.cap = self._new_capture(self.index)
+            if self.cap is not None and hasattr(self.cap, "set"):
+                try:
+                    import cv2
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                except Exception:
+                    pass
         except Exception as exc:
             self.last_error = safe_error(exc)
             self.state = H.OFFLINE
