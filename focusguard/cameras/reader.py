@@ -20,6 +20,7 @@ thread reads the source as fast as it delivers and keeps ONLY the newest frame:
 Health (:meth:`health`) never contains credentials: errors are redacted.
 """
 import hashlib
+import os
 import threading
 import time
 from collections import deque, namedtuple
@@ -46,10 +47,15 @@ class LatestFrameReader:
                  fps_window=30):
         self.source = source
         self.clock = clock
+        if stale_after == 3.0:
+            env_stale = os.environ.get("FG_CAMERA_STALE_SECONDS")
+            stale_after = float(env_stale) if env_stale else 6.0
         self.stale_after = float(stale_after)
         self.degraded_age = float(degraded_age)
         self.initial_backoff = float(initial_backoff)
         self.max_backoff = float(max_backoff)
+        if max_read_failures == 10:
+            max_read_failures = 30
         self.max_read_failures = int(max_read_failures)
         self.detect_repeats = (getattr(source, "source_type", None) == "RTSP") if detect_repeats is None \
             else bool(detect_repeats)
