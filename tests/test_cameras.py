@@ -627,6 +627,53 @@ def test_discovery_lan_scan_only_probes_private_hosts_with_bounded_concurrency()
     assert discovery.SCAN_WORKERS <= 64 and discovery.MAX_SUBNETS <= 2
 
 
+def test_discovery_reports_sdk_port_only_hosts_as_rtsp_disabled_after_every_rtsp_probe():
+    import threading
+    from focusguard.cameras import discovery
+    probed, lock = [], threading.Lock()
+    open_ports = {"192.168.7.20": {554, 8000}, "192.168.7.30": {8000}, "192.168.7.40": set()}
+
+    def connect_(ip, port, timeout=0.4):
+        with lock:
+            probed.append((ip, port))
+        return port in open_ports.get(ip, set())
+    dm = DiscoveryManager(NetGuard(), strategies=[discovery.strategy_lan_scan], local_ips=["192.168.7.5"],
+                          neighbours=["192.168.7.30", "8.8.8.8"], connect=connect_,
+                          rtsp_options=lambda ip, port: (rtsp.OK, "Hikvision-Webs"),
+                          rtsp_probe=lambda ip, port, path: rtsp.ProbeResult(rtsp.AUTH_REQUIRED, None, False, None, 401))
+    job = dm.start(1)
+    assert wait_until(lambda: job.status != "RUNNING", 10)
+    assert {port for _, port in probed} == {554, 8000}                     # camera ports only, nothing wider
+    assert all(ip.startswith("192.168.7.") and ip != "192.168.7.5" for ip, _ in probed)
+    # the SDK-port diagnosis runs only after every RTSP probe (real cameras win the time budget)
+    last_554 = max(i for i, (_ip, port) in enumerate(probed) if port == 554)
+    sdk_only = [i for i, (ip, port) in enumerate(probed) if port == 8000 and ip != "192.168.7.20"]
+    assert sdk_only and min(sdk_only) > last_554
+    assert len([1 for ip, port in probed if ip == "192.168.7.30" and port == 8000]) == 1
+    res = {r["host"]: r for r in job.public()["results"]}
+    assert set(res) == {"192.168.7.20", "192.168.7.30"}                     # both ports closed: not reported
+    assert res["192.168.7.20"]["status"] == "AUTH_REQUIRED"                 # RTSP open: unchanged
+    off = res["192.168.7.30"]
+    assert off["status"] == discovery.ST_RTSP_DISABLED == "RTSP_DISABLED"
+    assert off["status_label"] == "Có thể là camera EZVIZ/Hikvision — chưa bật RTSP"
+    assert off["protocols_detected"] == ["SDK"] and off["suggested_port"] is None
+    assert off["auth_required"] is None and off["display_name"] == "Thiết bị chưa rõ"
+    assert not any(k.startswith("_") for k in off) and "mac" not in str(off).lower()
+    assert discovery.rtsp_disabled(dm.lookup(1, off["discovery_id"]))
+
+
+def test_discovery_sdk_port_never_overrides_an_onvif_or_rtsp_finding():
+    from focusguard.cameras.discovery import DiscoveryJob, ST_RTSP_DISABLED
+    job = DiscoveryJob(1, 15)
+    job.add("192.168.1.64", protocols=["ONVIF"], confidence="high")
+    job.add("192.168.1.64", protocols=["SDK"], confidence="low")
+    job.add("192.168.1.65", protocols=["SDK"], confidence="low")
+    job.add("192.168.1.66", protocols=[], confidence="low")
+    st = {r["host"]: r["status"] for r in job.public()["results"]}
+    assert st == {"192.168.1.64": "AUTH_REQUIRED", "192.168.1.65": ST_RTSP_DISABLED,
+                  "192.168.1.66": "NO_COMPATIBLE_STREAM"}
+
+
 def test_discovery_limits_parallel_jobs():
     import threading
     gate = threading.Event()

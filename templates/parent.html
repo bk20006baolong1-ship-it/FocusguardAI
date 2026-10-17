@@ -23,7 +23,7 @@
 
   <section class="fg-card" aria-labelledby="liveTitle">
     <div class="fg-card-header">
-      <h2 class="fg-card-title" id="liveTitle"><i class="fa-solid fa-signal me-2 text-primary" aria-hidden="true"></i>Hiện tại</h2>
+      <h2 class="fg-card-title" id="liveTitle">Hiện tại</h2>
       <span id="liveBadge"></span>
     </div>
     <div class="fg-card-body" id="liveBody" aria-live="polite">
@@ -84,7 +84,7 @@
   </section>
 
   <section class="fg-card" aria-labelledby="recoTitle">
-    <div class="fg-card-header"><h2 class="fg-card-title" id="recoTitle"><i class="fa-solid fa-clock me-2 text-primary" aria-hidden="true"></i>Khung giờ con học tốt nhất</h2></div>
+    <div class="fg-card-header"><h2 class="fg-card-title" id="recoTitle">Khung giờ con học tốt nhất</h2></div>
     <div class="fg-card-body">
       {% if recommendations and recommendations.best_time_range %}
       <div class="fg-row">
@@ -106,7 +106,7 @@
 
   <div class="fg-grid fg-grid-2">
     <section class="fg-card" aria-labelledby="compTitle">
-      <div class="fg-card-header"><h2 class="fg-card-title" id="compTitle"><i class="fa-solid fa-chart-column me-2 text-primary" aria-hidden="true"></i>Điểm các phiên học gần đây</h2></div>
+      <div class="fg-card-header"><h2 class="fg-card-title" id="compTitle">Điểm các phiên học gần đây</h2></div>
       <div class="fg-card-body" id="compBody">
         {% if not comparison %}
         <div class="fg-state is-compact">
@@ -123,7 +123,7 @@
     <section class="fg-card" aria-labelledby="heatTitle">
       <div class="fg-card-header">
         <div>
-          <h2 class="fg-card-title" id="heatTitle"><i class="fa-solid fa-table-cells me-2 text-primary" aria-hidden="true"></i>Điểm trung bình theo giờ bắt đầu học</h2>
+          <h2 class="fg-card-title" id="heatTitle">Điểm trung bình theo giờ bắt đầu học</h2>
           <p class="fg-caption mb-0">Ô nét đứt là khung giờ chưa có phiên học nào.</p>
         </div>
       </div>
@@ -155,7 +155,7 @@
   <section class="fg-card" aria-labelledby="attTitle">
     <div class="fg-card-header">
       <div>
-        <h2 class="fg-card-title" id="attTitle"><i class="fa-solid fa-clipboard-check me-2 text-primary" aria-hidden="true"></i>Điểm danh các buổi học trên lớp</h2>
+        <h2 class="fg-card-title" id="attTitle">Điểm danh các buổi học trên lớp</h2>
         <p class="fg-caption mb-0">10 buổi gần nhất, gồm cả buổi vắng mặt.</p>
       </div>
     </div>
@@ -192,7 +192,7 @@
   <section class="fg-card" aria-labelledby="parentPrivacyTitle" id="parentPrivacy" data-student="{{ student_id }}">
     <div class="fg-card-header">
       <div>
-        <h2 class="fg-card-title" id="parentPrivacyTitle"><i class="fa-solid fa-shield-halved me-2 text-primary" aria-hidden="true"></i>Quyền riêng tư của con</h2>
+        <h2 class="fg-card-title" id="parentPrivacyTitle">Quyền riêng tư của con</h2>
         <p class="fg-caption mb-0">Phiên bản chính sách {{ policy.policy_version }}</p>
       </div>
       {% set tone = {'ACTIVE': 'success', 'EXPIRED': 'warning', 'REVOKED': 'danger'}.get(consent.state, 'neutral') %}

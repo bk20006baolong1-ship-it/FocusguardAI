@@ -141,25 +141,19 @@
     <div class="fg-stack">
       <section class="fg-card" aria-labelledby="attentionTitle">
         <div class="fg-card-header">
-          <h2 class="fg-card-title" id="attentionTitle"><i class="fa-solid fa-triangle-exclamation text-warning me-2" aria-hidden="true"></i>Cần chú ý ngay</h2>
-          <div class="fg-row">
-            <button type="button" class="btn btn-secondary btn-sm" id="teacherSoundBtn" aria-pressed="false" aria-label="Bật/tắt âm báo khi có học sinh cần chú ý" title="Âm báo khi có học sinh cần chú ý"><i class="fa-solid fa-bell-slash me-1" aria-hidden="true"></i>Âm báo</button>
-            <span class="fg-caption" id="attentionCount"></span>
-          </div>
+          <h2 class="fg-card-title" id="attentionTitle">Cần chú ý ngay</h2>
+          <span class="fg-caption" id="attentionCount"></span>
         </div>
         <div class="fg-card-body is-flush" id="attentionList" aria-live="polite"></div>
       </section>
 
       <section class="fg-card" aria-labelledby="studentsTitle">
         <div class="fg-card-header">
-          <h2 class="fg-card-title" id="studentsTitle"><i class="fa-solid fa-user-group me-2" aria-hidden="true"></i>Học sinh trong lớp</h2>
-          <div class="fg-row">
-            <input type="search" class="form-control form-control-sm" id="studentQuickSearch" placeholder="Tìm tên..." style="width: 130px;" aria-label="Tìm nhanh học sinh theo tên">
-            <div class="fg-tabs" role="group" aria-label="Lọc học sinh" id="studentFilter">
-              <button type="button" class="fg-tab is-active" data-filter="all" aria-pressed="true"><i class="fa-solid fa-list me-1" aria-hidden="true"></i>Tất cả</button>
-              <button type="button" class="fg-tab" data-filter="attention" aria-pressed="false"><i class="fa-solid fa-bell me-1" aria-hidden="true"></i>Cần chú ý</button>
-              <button type="button" class="fg-tab" data-filter="missing" aria-pressed="false"><i class="fa-solid fa-eye-slash me-1" aria-hidden="true"></i>Chưa thấy</button>
-            </div>
+          <h2 class="fg-card-title" id="studentsTitle">Học sinh trong lớp</h2>
+          <div class="fg-tabs" role="group" aria-label="Lọc học sinh" id="studentFilter">
+            <button type="button" class="fg-tab is-active" data-filter="all" aria-pressed="true">Tất cả</button>
+            <button type="button" class="fg-tab" data-filter="attention" aria-pressed="false">Cần chú ý</button>
+            <button type="button" class="fg-tab" data-filter="missing" aria-pressed="false">Chưa thấy</button>
           </div>
         </div>
         <div id="studentGrid"></div>
@@ -169,11 +163,8 @@
     <div class="fg-stack">
       <section class="fg-card" aria-labelledby="cameraTitle" id="cameraCard">
         <div class="fg-card-header">
-          <h2 class="fg-card-title" id="cameraTitle"><i class="fa-solid fa-video me-2 text-primary" aria-hidden="true"></i>Camera lớp học</h2>
-          <div class="fg-row">
-            <button type="button" class="btn btn-secondary btn-sm" id="camFullscreenBtn" aria-label="Toàn màn hình camera" title="Toàn màn hình camera"><i class="fa-solid fa-expand me-1" aria-hidden="true"></i>Toàn màn hình</button>
-            <span class="fg-badge" id="cameraBadge" data-tone="neutral"><i class="fa-solid fa-video-slash" aria-hidden="true"></i>Chưa bật</span>
-          </div>
+          <h2 class="fg-card-title" id="cameraTitle">Camera lớp học</h2>
+          <span class="fg-badge" id="cameraBadge" data-tone="neutral"><i class="fa-solid fa-video-slash" aria-hidden="true"></i>Chưa bật</span>
         </div>
         <div class="fg-card-body">
           <div class="fg-camera" id="cameraBox">
@@ -184,7 +175,10 @@
               <div class="fg-camera-state-title">Camera chưa bật</div>
               <p class="fg-camera-state-text">Bắt đầu buổi học ở chế độ Camera lớp học để bật camera.</p>
             </div>
+            <button type="button" class="btn btn-sm fg-camera-expand" id="cameraExpand" aria-pressed="false"
+                    aria-label="Phóng to camera"><i class="fa-solid fa-expand" aria-hidden="true"></i><span>Phóng to</span></button>
           </div>
+          <div class="fg-camera-backdrop" id="cameraBackdrop" hidden></div>
           <p class="fg-caption mb-1" id="cameraSourceInfo" role="status" aria-live="polite"></p>
           <p class="fg-helper mb-0"><i class="fa-solid fa-shield-halved me-1" aria-hidden="true"></i>{{ privacy_notice }}</p>
         </div>
@@ -214,7 +208,7 @@
 
       <section class="fg-card" aria-labelledby="logTitle">
         <div class="fg-card-header">
-          <h2 class="fg-card-title" id="logTitle"><i class="fa-solid fa-clock-rotate-left me-2 text-primary" aria-hidden="true"></i>Hoạt động gần đây</h2>
+          <h2 class="fg-card-title" id="logTitle">Hoạt động gần đây</h2>
           <a class="btn btn-link btn-sm" href="{{ url_for('teacher_alerts') }}">Xem tất cả</a>
         </div>
         <div class="fg-card-body is-flush fg-scroll" id="logList"></div>
@@ -223,7 +217,7 @@
       <section class="fg-card" aria-labelledby="reviewQueueTitle">
         <div class="fg-card-header">
           <div>
-            <h2 class="fg-card-title" id="reviewQueueTitle"><i class="fa-solid fa-clipboard-check me-2 text-primary" aria-hidden="true"></i>Cần giáo viên xem lại</h2>
+            <h2 class="fg-card-title" id="reviewQueueTitle">Cần giáo viên xem lại</h2>
             <p class="fg-caption mb-0">Học sinh có nhiều sự kiện AI chưa được xác nhận. Danh sách để giáo viên kiểm tra lại, không phải nhận xét về học sinh.</p>
           </div>
           <a class="btn btn-link btn-sm" href="{{ url_for('teacher_events') }}">Mở trang Sự kiện</a>
@@ -287,9 +281,9 @@
         <p class="fg-caption mb-0" id="alertsSub"></p>
       </div>
       <div class="fg-tabs" role="group" aria-label="Lọc nhật ký" id="alertFilter">
-        <button type="button" class="fg-tab is-active" data-filter="all" aria-pressed="true"><i class="fa-solid fa-list me-1" aria-hidden="true"></i>Tất cả</button>
-        <button type="button" class="fg-tab" data-filter="behavior" aria-pressed="false"><i class="fa-solid fa-chart-line me-1" aria-hidden="true"></i>Hành vi</button>
-        <button type="button" class="fg-tab" data-filter="attendance" aria-pressed="false"><i class="fa-solid fa-clipboard-check me-1" aria-hidden="true"></i>Điểm danh</button>
+        <button type="button" class="fg-tab is-active" data-filter="all" aria-pressed="true">Tất cả</button>
+        <button type="button" class="fg-tab" data-filter="behavior" aria-pressed="false">Hành vi</button>
+        <button type="button" class="fg-tab" data-filter="attendance" aria-pressed="false">Điểm danh</button>
       </div>
     </div>
     <div class="fg-card-body is-flush" id="alertsBody" aria-live="polite"></div>

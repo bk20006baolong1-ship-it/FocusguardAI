@@ -239,7 +239,7 @@ def adhoc_installs(text):
 
 
 def check_docs(problems):
-    me = os.path.relpath(os.path.abspath(__file__), ROOT).replace(os.sep, "/")
+    me = os.path.relpath(os.path.abspath(__file__), ROOT)
     for root, dirs, files in os.walk(ROOT):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for f in files:

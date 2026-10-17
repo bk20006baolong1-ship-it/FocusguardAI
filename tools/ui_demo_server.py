@@ -11,7 +11,8 @@ Pillow (requirements-dev.txt) for the grey frames and the evidence crop.
 
 Camera settings run against TEST DOUBLES only (focusguard/cameras/testing.py):
 LAN discovery "finds" one simulated EZVIZ camera at 192.168.1.64 (verification
-code ABCDEF), the stream is synthetic frames, nothing touches the network. A
+code ABCDEF) and one simulated camera with RTSP off at 192.168.1.4 (SDK port
+only), the stream is synthetic frames, nothing touches the network. A
 second teacher account (teacher2, class 10A2) exists for the IDOR checks.
 """
 import io
@@ -87,7 +88,8 @@ from focusguard.cameras.discovery import DiscoveryManager  # noqa: E402
 from focusguard.cameras.netguard import NetGuard  # noqa: E402
 from focusguard.cameras.onvif import OnvifError  # noqa: E402
 from focusguard.cameras.service import CameraService  # noqa: E402
-from focusguard.cameras.testing import MockCameraSource, mock_discovery_strategy  # noqa: E402
+from focusguard.cameras.testing import (MockCameraSource, mock_discovery_strategy,  # noqa: E402
+                                        mock_rtsp_disabled_strategy)
 
 DEMO_CAMERA_CODE = "ABCDEF"
 
@@ -123,8 +125,9 @@ def pil_jpeg(image):
 guard = NetGuard()
 sm.cameras = CameraService(
     sm.repo, sm.audit, vault=CredentialVault(generate_key()), netguard=guard,
-    discovery=DiscoveryManager(guard, strategies=[mock_discovery_strategy("192.168.1.64")], local_ips=[],
-                               neighbours=[]),
+    discovery=DiscoveryManager(guard, strategies=[mock_discovery_strategy("192.168.1.64"),
+                                                  mock_rtsp_disabled_strategy("192.168.1.4")],
+                               local_ips=[], neighbours=[]),
     connect_deps=DemoCameraDeps, measure_seconds=1.0,
     source_factory=lambda spec: MockCameraSource(name=spec.get("name"), width=640, height=360, fps=15,
                                                  source_type=spec.get("source_type")))

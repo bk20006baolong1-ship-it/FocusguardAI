@@ -22,7 +22,7 @@ from . import health as H
 from .connect import (DEFAULT_USERNAMES, PROTOCOL_AUTO, PROTOCOL_ONVIF, PROTOCOL_RTSP, PROTOCOLS, Deps, measure,
                       resolve_stream)
 from .crypto import CredentialError, CredentialKeyMissing, CredentialVault
-from .discovery import DiscoveryManager
+from .discovery import DiscoveryManager, rtsp_disabled
 from .netguard import (ORIGIN_DISCOVERED, ORIGIN_MANUAL, HostNotAllowed, NetGuard, check_path, check_port,
                        split_camera_url)
 from .reader import LatestFrameReader
@@ -265,6 +265,9 @@ class CameraService:
             found = self.discovery.lookup(p.user_id, str(data["discovery_id"]))
             if found is None:
                 raise CameraError("Kết quả tìm camera đã hết hạn. Hãy tìm lại.", 404, "DISCOVERY_EXPIRED")
+            if rtsp_disabled(found):                       # only the SDK port answered: RTSP is off
+                raise CameraError("Thiết bị chưa bật RTSP. Hãy bật RTSP trong ứng dụng của hãng rồi tìm lại.", 409,
+                                  "RTSP_DISABLED")
             # found by the server's own LAN discovery on an approved camera subnet
             spec.update(host=found["host"], port=found.get("suggested_port"), vendor=found.get("vendor"),
                         model=found.get("model"), onvif_port=found.get("_onvif_port"),

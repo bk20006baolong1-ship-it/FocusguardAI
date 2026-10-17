@@ -289,6 +289,36 @@ def test_discovery_respects_the_port_policy():
     assert probed == []                                                     # 554 / 8000 are not camera ports here
 
 
+def test_discovery_sdk_port_diagnosis_respects_the_port_policy():
+    probed = []
+    g = NetGuard.from_env({"FG_CAMERA_ALLOWED_NETWORKS": "192.168.1.0/24", "FG_CAMERA_ALLOWED_PORTS": "554"},
+                          local_ips=LOCAL)
+    dm = DiscoveryManager(g, strategies=[strategy_lan_scan], local_ips=LOCAL, neighbours=["192.168.1.4"],
+                          connect=lambda ip, port, timeout=0.4: probed.append(port) or port == 8000)
+    job = dm.start(1)
+    end = time.time() + 10
+    while job.status == "RUNNING" and time.time() < end:
+        time.sleep(0.02)
+    assert probed and set(probed) == {554}                                  # 8000 is not a camera port here
+    assert job.public()["results"] == []
+
+
+def test_an_rtsp_disabled_discovery_result_is_never_connectable(manager):
+    from focusguard.cameras.testing import mock_rtsp_disabled_strategy
+    svc = service(manager, {"FG_CAMERA_ALLOWED_NETWORKS": "192.168.1.0/24"},
+                  strategies=[mock_rtsp_disabled_strategy("192.168.1.4"), mock_rtsp_disabled_strategy("10.9.9.9")])
+    job = svc.discover(TEACHER)
+    end = time.time() + 5
+    while svc.discovery_status(TEACHER, job["job_id"])["status"] == "RUNNING" and time.time() < end:
+        time.sleep(0.02)
+    found = svc.discovery_status(TEACHER, job["job_id"])["results"]
+    assert [(f["host"], f["status"]) for f in found] == [("192.168.1.4", "RTSP_DISABLED")]
+    with pytest.raises(CameraError) as e:
+        svc.test_connection(TEACHER, {"discovery_id": found[0]["discovery_id"], "secret": SECRET})
+    assert e.value.code == "RTSP_DISABLED" and e.value.status == 409
+    assert Deps.calls == []                                                 # nothing was contacted
+
+
 def test_an_rtsp_redirect_is_never_followed():
     class RedirectDeps(connect.Deps):
         class onvif_client:

@@ -46,9 +46,9 @@ Tree hiện tại không chứa `.env`, khoá riêng, ảnh khuôn mặt, export
 Báo cáo đánh giá trước khi chia sẻ được quét bằng `scripts/artifact_privacy_check.py` (ảnh/base64, vector, đường dẫn
 ảnh/video/minh chứng, tên và tên đăng nhập học sinh/phụ huynh, email, số điện thoại; có tự kiểm bằng mẫu xấu cài sẵn).
 
-**Lịch sử git:** repo chính thức `DKTECHVN/focusAI` bắt đầu từ một snapshot sạch (commit gốc `6d78371`), **không**
-mang theo lịch sử của repo cũ. Repo cũ (trước khi chuyển) vẫn còn các commit chứa một ảnh khuôn mặt, export Firebase
-Emulator, `.env` cũ (không có secret), file phiên học và một khoá riêng **giả dùng cho emulator**. Việc lưu trữ/xóa repo
+**Lịch sử mã nguồn:** mã nguồn hiện tại bắt đầu từ một snapshot sạch, **không** mang theo lịch sử của bản lưu trữ
+cũ. Bản lưu trữ cũ (trước khi chuyển) vẫn còn các commit chứa một ảnh khuôn mặt, export Firebase
+Emulator, `.env` cũ (không có secret), file phiên học và một khoá riêng **giả dùng cho emulator**. Việc lưu trữ/xóa bản
 cũ là quyết định của đội; coi khoá giả đó là đã lộ (không dùng ở đâu khác).
 
 ## Bảo mật ứng dụng

@@ -40,7 +40,6 @@ recorder). Each may implement ``on_frame(rt, now, observations)``,
 and ``on_end(rt, now)``. Hook failures never break the camera loop.
 """
 import functools
-import os
 import threading
 import uuid
 from collections import deque
@@ -101,9 +100,6 @@ class SessionRuntime:
         self.sink = sink or NullSink()
         self.notifier = notifier
         self.snapshot_interval = snapshot_interval_seconds
-        if camera_stale_seconds == 3.0:
-            env_stale = os.environ.get("FG_CAMERA_STALE_SECONDS")
-            camera_stale_seconds = float(env_stale) if env_stale else 6.0
         self.camera_stale_seconds = camera_stale_seconds
         self.source = source
         self.started_at = started_at

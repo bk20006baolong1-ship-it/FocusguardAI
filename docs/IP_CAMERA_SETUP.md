@@ -22,6 +22,19 @@ Thứ tự, tổng thời gian tối đa ~15 giây (5–20 s), chạy nền, có
    theo `FG_CAMERA_ALLOWED_NETWORKS` nếu có (tối đa 2 dải, 48 kết nối song song, 0,4 s mỗi kết nối). Không bao giờ dò
    mạng khác hay toàn bộ dải nội bộ. Máy có RTSP được hỏi `OPTIONS` / `DESCRIBE` **không kèm mật khẩu** để biết có cần
    xác thực không. Thiết bị trả lời WS-Discovery / SSDP / ARP nằm ngoài mạng camera được phép bị bỏ qua.
+5. **Chẩn đoán “chưa bật RTSP”**: sau khi dò xong cổng 554, các máy **đóng cổng 554** trong cùng dải đó được thử thêm
+   một kết nối TCP tới cổng **8000** (cổng SDK của Hikvision / EZVIZ — đã nằm trong danh sách cổng camera; không dò
+   thêm cổng nào khác, cùng giới hạn song song / thời gian; bỏ qua nếu 8000 không được `FG_CAMERA_ALLOWED_PORTS` cho
+   phép). Máy mở 8000 nhưng đóng 554 hiện với trạng thái `RTSP_DISABLED` — “Có thể là camera EZVIZ/Hikvision — chưa
+   bật RTSP” — **không** có nút Kết nối (máy chủ cũng từ chối kết nối từ kết quả này). FocusGuard không nói chuyện với
+   cổng 8000 (không dùng SDK / giao thức riêng / đám mây của hãng); đây chỉ là gợi ý để người dùng bật RTSP:
+   ứng dụng EZVIZ › **Cài đặt** (Settings) › **Xem trực tiếp qua LAN** (LAN Live View) › chọn camera ›
+   **Cài đặt dịch vụ cục bộ** (Local Service Settings) › bật RTSP, rồi bấm **Tìm lại**. Mẫu chỉ hỗ trợ giao thức
+   đám mây EZVIZ (trang thông số chỉ ghi “EZVIZ Cloud”) thì không dùng được. Cổng 8000 cũng có thể là thiết bị khác
+   (ví dụ máy tính chạy dịch vụ web) — vì vậy nhãn là “có thể”.
+
+Trạng thái kết quả tìm: `CONNECTABLE` (Có thể kết nối), `AUTH_REQUIRED` (Cần xác thực), `RTSP_DISABLED` (chưa bật
+RTSP — chỉ chẩn đoán), `NO_COMPATIBLE_STREAM` (Camera không tương thích).
 
 mDNS không được dùng (camera hiếm khi quảng bá video qua mDNS, và sẽ phải thêm thư viện). Kết quả không chứa địa chỉ
 MAC; địa chỉ IP chỉ hiện cho giáo viên / quản trị viên.
@@ -126,6 +139,7 @@ học sinh”. Hãy đặt camera gần hơn / độ phân giải cao hơn; khô
 | Hiện tượng | Kiểm tra |
 |---|---|
 | Không tìm thấy camera | cùng mạng? router chặn multicast? thử Thêm thủ công bằng IP trong ứng dụng EZVIZ / router |
+| Có thể là camera EZVIZ/Hikvision — chưa bật RTSP | ứng dụng EZVIZ › Cài đặt › LAN Live View › chọn camera › Local Service Settings › bật RTSP, rồi Tìm lại (mục 2) |
 | Sai tên đăng nhập hoặc mật khẩu | mã xác minh in hoa; đợi nếu camera tạm khóa sau nhiều lần sai |
 | Camera không tương thích | bật RTSP/ONVIF trong ứng dụng hãng; mẫu chỉ hỗ trợ đám mây thì không dùng được |
 | Địa chỉ không thuộc mạng camera được phép | dùng “Tìm camera”; hoặc quản trị viên thêm mạng vào `FG_CAMERA_ALLOWED_NETWORKS` (hoặc địa chỉ vào `FG_CAMERA_ALLOWED_HOSTS`) |

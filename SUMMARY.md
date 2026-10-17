@@ -20,9 +20,9 @@ từ dữ liệu thật. Mọi tuyên bố về "AI" được giới hạn ở n
 | Loại bỏ dữ liệu giả | Có | không mock students, drift ngẫu nhiên, cảm xúc, dự báo, root-cause mặc định, seed phiên giả |
 | Analytics thật | Có | `insufficient_data` khi thiếu dữ liệu (giao diện ghi "Chưa có" / "Chưa đủ dữ liệu"); zero stays zero |
 | Khung đánh giá | Có | P/R/F1, cảnh báo sai/giờ, độ trễ, danh tính, FPS – nhãn SYNTHETIC |
-| Kiểm chứng | Có | chạy trực tiếp trên cloud (không dùng GitHub Actions làm cổng): compile, import, pytest, JS syntax, security check, đánh giá SYNTHETIC, gói đánh giá cloud, quét quyền riêng tư báo cáo, Firestore emulator, đi thử bằng trình duyệt |
+| Kiểm chứng | Có | chạy trực tiếp trên cloud: compile, import, pytest, JS syntax, security check, đánh giá SYNTHETIC, gói đánh giá cloud, quét quyền riêng tư báo cáo, Firestore emulator, đi thử bằng trình duyệt |
 
-## Cải tiến theo góp ý BTC (đã có trên `main` của `DKTECHVN/focusAI`; chi tiết: [docs/BTC_FEEDBACK_CLOSURE.md](docs/BTC_FEEDBACK_CLOSURE.md))
+## Cải tiến theo góp ý BTC (đã có trong mã nguồn hiện tại; chi tiết: [docs/BTC_FEEDBACK_CLOSURE.md](docs/BTC_FEEDBACK_CLOSURE.md))
 
 | Góp ý | Triển khai | Kiểm thử | Trạng thái |
 |---|---|---|---|

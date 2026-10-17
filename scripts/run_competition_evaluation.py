@@ -58,7 +58,7 @@ def git_sha():
         return subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True,
                               check=True).stdout.strip()
     except Exception:
-        return os.environ.get("GITHUB_SHA")
+        return os.environ.get("FG_SOURCE_SHA")
 
 
 def fmt(v):

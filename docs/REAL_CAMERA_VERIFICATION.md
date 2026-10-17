@@ -6,7 +6,7 @@ kết quả thực tế vẫn là `NOT_EVALUATED` cho tới khi có bộ dữ li
 ## 0. Chuẩn bị (một lần)
 
 ```bash
-git clone https://github.com/DKTECHVN/focusAI && cd focusAI      # repo chính thức, nhánh main
+cd FocusGuard                        # thư mục mã nguồn
 source .venv/bin/activate            # hoặc: python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt      # OpenCV, MediaPipe, ultralytics (YOLOv8), insightface, onnxruntime, eventlet, Firestore libs
 python tools/download_models.py      # tải InsightFace buffalo_sc vào ~/.insightface (cần mạng, một lần)

@@ -337,6 +337,10 @@ def camera_teacher_flow(ctx, vp):
     found = page.text_content("#discoveryResults")
     check(vp, "LAN discovery finds the (mock) EZVIZ camera and says it needs authentication",
           "EZVIZ" in found and "Cần xác thực" in found, page.text_content("#discoveryStatus").strip())
+    check(vp, "A device with RTSP off is shown with the 'enable RTSP' guidance and no connect button",
+          "chưa bật RTSP" in found and "Local Service Settings" in found
+          and page.locator("#discoveryResults .fg-cam-card").count() == 2
+          and page.locator("#discoveryResults [data-act=connect]").count() == 1)
     page_checks(page, vp, "Camera discovery", "11-camera-discovery")
     page.click("#discoveryResults [data-act=connect]")
     page.wait_for_selector("#connectModal.show", timeout=10000)
@@ -523,13 +527,23 @@ def classroom_identity_flow(ctx, vp):
                            "b.dataset.tone === 'info').length >= 3", timeout=20000)
     check(vp, "AI suggests 3 known students", True)
     page_checks(page, vp, "Classroom initialization", "15-init")
+    small_w = page.evaluate("document.getElementById('cameraBox').clientWidth")
+    page.click("#cameraExpand")                    # Phóng to camera: tag on the large view
+    big = page.evaluate("(() => { const b = document.getElementById('cameraBox'); "
+                        "return {on: b.classList.contains('is-expanded'), w: b.clientWidth, "
+                        "tracks: document.querySelectorAll('#trackOverlay .fg-track').length}; })()")
+    check(vp, "Phóng to camera: larger view with the clickable persons", big["on"] and big["w"] > small_w and big["tracks"] == 5,
+          f"{small_w}px -> {big['w']}px, {big['tracks']} persons")
     for tid in (1, 2):
         open_track(page, tid)
         check(vp, f"Track {tid}: AI suggestion offered", page.is_visible("#tagSuggestion"))
         page.click("#tagAccept")
         page.wait_for_selector("#tagModal", state="hidden", timeout=10000)
         page.wait_for_selector(f"#trackOverlay [data-track='{tid}'][data-tone=success]", timeout=10000)
-    check(vp, "Teacher confirmed 2 suggestions", True)
+    check(vp, "Teacher confirmed 2 suggestions (on the enlarged camera)", True)
+    page.keyboard.press("Escape")
+    check(vp, "Esc returns the camera to its normal size",
+          not page.evaluate("document.getElementById('cameraBox').classList.contains('is-expanded')"))
     open_track(page, 3)
     sug = page.text_content("#tagSuggestionText")
     page.click("#tagOther")
@@ -594,12 +608,19 @@ def classroom_identity_flow(ctx, vp):
     check(vp, "Attendance teacher override saved (GV sửa)", True)
     page_checks(page, vp, "Attendance override", "17-attendance")
     start_classroom(page, initialize=False)        # ends the running one first, then a later session
+    open_track(page, 2)                            # the teacher opens a person who then leaves the frame
     sim(page, "remove", "P2")                      # student 4 leaves the room for a moment ...
+    page.wait_for_function("document.getElementById('tagCurrent').textContent.includes('không còn trong khung hình')",
+                           timeout=15000)
+    page.click("#tagModal .btn-close")
+    page.wait_for_selector("#tagModal", state="hidden", timeout=10000)
     sim(page, "bias", "P1", "P2", 0.85)            # ... and P1's face resembles 4's profile: a wrong recognition
     page.wait_for_function("(() => { const b = document.querySelector(\"#trackOverlay [data-track='1']\"); "
                            "return b && b.getAttribute('aria-label').includes('AI: Trần Thị Bình'); })()", timeout=30000)
     check(vp, "Later session: AI recognizes (here wrongly) without tagging", True)
     open_track(page, 1)
+    check(vp, "Tag button usable again after a person left the frame while the dialog was open",
+          page.is_enabled("#tagSave"))
     page.check("#tagList input[value='3']")
     page.click("#tagSave")
     page.wait_for_selector("#tagModal", state="hidden", timeout=10000)

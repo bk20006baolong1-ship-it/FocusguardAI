@@ -7,9 +7,6 @@
   <script>
     (function () { try { var t = localStorage.getItem("fg-theme"); if (t === "dark" || t === "light") document.documentElement.setAttribute("data-bs-theme", t); } catch (e) {} })();
   </script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
   <link href="{{ url_for('static', filename='css/all.min.css') }}" rel="stylesheet">
   <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
@@ -18,7 +15,7 @@
 <div class="fg-auth">
   <section class="fg-auth-side" aria-label="Giới thiệu FocusGuard">
     <div class="fg-row">
-      <span class="fg-brand-mark" style="background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: #fff; box-shadow: none;"><i class="fa-solid fa-eye" aria-hidden="true"></i></span>
+      <span class="fg-brand-mark" style="background: #fff; color: var(--fg-primary);"><i class="fa-solid fa-eye" aria-hidden="true"></i></span>
       <strong style="font-size: 1.25rem;">FocusGuard</strong>
     </div>
     <h1>Hỗ trợ giáo viên nhận biết khi học sinh cần được quan tâm</h1>
@@ -80,10 +77,10 @@
           <p class="fg-card-title mb-1">Tài khoản thử nghiệm</p>
           <p class="fg-helper mt-0 mb-3">Chỉ có ở môi trường phát triển. Chọn một vai trò để điền sẵn tên đăng nhập.</p>
           <div class="fg-row" id="demoAccounts">
-            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="teacher"><i class="fa-solid fa-chalkboard-user me-1" aria-hidden="true"></i>Giáo viên</button>
-            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="hocsinh"><i class="fa-solid fa-graduation-cap me-1" aria-hidden="true"></i>Học sinh</button>
-            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="phuhuynh"><i class="fa-solid fa-users me-1" aria-hidden="true"></i>Phụ huynh</button>
-            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="admin"><i class="fa-solid fa-shield-halved me-1" aria-hidden="true"></i>Quản trị</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="teacher">Giáo viên</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="hocsinh">Học sinh</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="phuhuynh">Phụ huynh</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-demo-user="admin">Quản trị</button>
           </div>
         </div>
       </div>

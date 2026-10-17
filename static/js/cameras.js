@@ -205,16 +205,26 @@
     FG.busy($("camDiscover"), false);
     $("discoveryStop").hidden = true; $("discoveryRefresh").hidden = false;
     const n = S.job ? S.job.count : 0;
-    setDiscovery(n ? "Đã tìm thấy " + n + " camera" + (S.job.status === "STOPPED" ? " (đã dừng tìm)" : "") + "."
+    const rtspOff = n && S.job.results.some((r) => r.status === "RTSP_DISABLED");
+    setDiscovery(n ? "Đã tìm thấy " + n + " thiết bị" + (S.job.status === "STOPPED" ? " (đã dừng tìm)" : "") + "."
+      + (rtspOff ? " Thiết bị “chưa bật RTSP”: xem hướng dẫn trên thẻ." : "")
       : "Không tìm thấy camera. Camera phải cùng mạng LAN với máy chạy FocusGuard.");
   }
+
+  const DISCOVERY_TONE = { CONNECTABLE: "success", AUTH_REQUIRED: "warning", RTSP_DISABLED: "warning" };
+  const DISCOVERY_ICON = { CONNECTABLE: "fa-circle-check", AUTH_REQUIRED: "fa-key", RTSP_DISABLED: "fa-video-slash" };
+  // 554 closed, SDK port 8000 open: an EZVIZ/Hikvision camera whose LAN RTSP is off (never the vendor cloud)
+  const RTSP_OFF_HELP = '<p class="fg-caption mb-0">Camera EZVIZ: mở ứng dụng EZVIZ › <b>Cài đặt</b> (Settings) › ' +
+    "<b>Xem trực tiếp qua LAN</b> (LAN Live View) › chọn camera › <b>Cài đặt dịch vụ cục bộ</b> (Local Service Settings) " +
+    "› bật RTSP, rồi bấm <b>Tìm lại</b>. Mẫu chỉ hỗ trợ đám mây EZVIZ thì không dùng được với FocusGuard.</p>";
 
   function renderResults() {
     const list = (S.job && S.job.results) || [];
     $("discoveryResults").innerHTML = list.map((r) => {
-      const tone = r.status === "CONNECTABLE" ? "success" : r.status === "AUTH_REQUIRED" ? "warning" : "danger";
-      const icon = r.status === "CONNECTABLE" ? "fa-circle-check" : r.status === "AUTH_REQUIRED" ? "fa-key" : "fa-ban";
-      const compatible = r.status !== "NO_COMPATIBLE_STREAM";
+      const tone = DISCOVERY_TONE[r.status] || "danger";
+      const icon = DISCOVERY_ICON[r.status] || "fa-ban";
+      const rtspOff = r.status === "RTSP_DISABLED";
+      const compatible = r.status !== "NO_COMPATIBLE_STREAM" && !rtspOff;
       return '<article class="fg-cam-card is-found">' +
         '<div class="fg-cam-head"><span class="fg-cam-icon" aria-hidden="true"><i class="fa-solid fa-video"></i></span>' +
         '<h3 class="fg-cam-name">' + esc(r.display_name) + "</h3></div>" +
@@ -222,9 +232,11 @@
         '<dl class="fg-cam-meta">' +
         (r.vendor || r.model ? "<div><dt>Hãng / mẫu</dt><dd>" + esc([r.vendor, r.model].filter(Boolean).join(" ")) + "</dd></div>" : "") +
         "<div><dt>Địa chỉ IP</dt><dd>" + esc(r.host) + "</dd></div></dl>" +
+        (rtspOff ? RTSP_OFF_HELP : "") +
         '<div class="fg-cam-actions">' + (compatible
           ? '<button type="button" class="btn btn-primary btn-sm" data-act="connect" data-id="' + esc(r.discovery_id) + '"><i class="fa-solid fa-link" aria-hidden="true"></i>Kết nối</button>'
-          : '<span class="fg-caption">Không có luồng video trong LAN</span>') + "</div></article>";
+          : '<span class="fg-caption">' + (rtspOff ? "Chưa có luồng RTSP trong LAN" : "Không có luồng video trong LAN") +
+            "</span>") + "</div></article>";
     }).join("");
   }
 

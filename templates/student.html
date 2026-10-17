@@ -59,7 +59,7 @@
     <div class="fg-stack">
       <section class="fg-card" aria-labelledby="cameraTitle">
         <div class="fg-card-header">
-          <h2 class="fg-card-title" id="cameraTitle"><i class="fa-solid fa-video me-2 text-primary" aria-hidden="true"></i>Camera của em</h2>
+          <h2 class="fg-card-title" id="cameraTitle">Camera của em</h2>
           <span class="fg-badge" id="cameraBadge" data-tone="neutral"><i class="fa-solid fa-video-slash" aria-hidden="true"></i>Chưa bật</span>
         </div>
         <div class="fg-card-body">
@@ -76,7 +76,7 @@
       </section>
 
       <section class="fg-card" aria-labelledby="chartTitle">
-        <div class="fg-card-header"><h2 class="fg-card-title" id="chartTitle"><i class="fa-solid fa-chart-line me-2 text-primary" aria-hidden="true"></i>Điểm tập trung trong phiên này</h2></div>
+        <div class="fg-card-header"><h2 class="fg-card-title" id="chartTitle">Điểm tập trung trong phiên này</h2></div>
         <div class="fg-card-body" id="chartBody"></div>
       </section>
     </div>
@@ -84,7 +84,7 @@
     <div class="fg-stack">
       <section class="fg-card" aria-labelledby="scoreTitle">
         <div class="fg-card-header">
-          <h2 class="fg-card-title" id="scoreTitle"><i class="fa-solid fa-gauge-high me-2 text-primary" aria-hidden="true"></i>Điểm tập trung</h2>
+          <h2 class="fg-card-title" id="scoreTitle">Điểm tập trung</h2>
           <span id="stateBadge"></span>
         </div>
         <div class="fg-card-body">
@@ -104,7 +104,7 @@
       </section>
 
       <section class="fg-card" aria-labelledby="countsTitle">
-        <div class="fg-card-header"><h2 class="fg-card-title" id="countsTitle"><i class="fa-solid fa-list-check me-2 text-primary" aria-hidden="true"></i>Ghi nhận trong phiên này</h2></div>
+        <div class="fg-card-header"><h2 class="fg-card-title" id="countsTitle">Ghi nhận trong phiên này</h2></div>
         <div class="fg-card-body" id="countsBody"></div>
       </section>
     </div>
@@ -114,29 +114,29 @@
   {# ───────────────────────────── Thống kê ───────────────────────────── #}
   {% if active_tab == 'stats' %}
   <section class="fg-grid fg-grid-metrics" aria-label="Tổng quan">
-    <div class="fg-card fg-metric"><span class="fg-metric-label"><i class="fa-solid fa-graduation-cap me-1" aria-hidden="true"></i>Phiên học đã hoàn thành</span><span class="fg-metric-value" id="pSessions">—</span></div>
-    <div class="fg-card fg-metric"><span class="fg-metric-label"><i class="fa-solid fa-clock me-1" aria-hidden="true"></i>Tổng thời gian học</span><span class="fg-metric-value" id="pTime" style="font-size: 1.375rem;">—</span></div>
-    <div class="fg-card fg-metric"><span class="fg-metric-label"><i class="fa-solid fa-chart-line me-1" aria-hidden="true"></i>Điểm tập trung trung bình</span><span class="fg-metric-value" id="pAvg">—</span></div>
-    <div class="fg-card fg-metric"><span class="fg-metric-label"><i class="fa-solid fa-arrow-trend-up me-1" aria-hidden="true"></i>Xu hướng gần đây</span><span class="fg-metric-value" id="pTrend" style="font-size: 1.25rem;">—</span><span class="fg-metric-sub" id="pTrendSub"></span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Phiên học đã hoàn thành</span><span class="fg-metric-value" id="pSessions">—</span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Tổng thời gian học</span><span class="fg-metric-value" id="pTime" style="font-size: 1.375rem;">—</span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Điểm tập trung trung bình</span><span class="fg-metric-value" id="pAvg">—</span></div>
+    <div class="fg-card fg-metric"><span class="fg-metric-label">Xu hướng gần đây</span><span class="fg-metric-value" id="pTrend" style="font-size: 1.25rem;">—</span><span class="fg-metric-sub" id="pTrendSub"></span></div>
   </section>
   <section class="fg-card" aria-labelledby="recoTitle">
-    <div class="fg-card-header"><h2 class="fg-card-title" id="recoTitle"><i class="fa-solid fa-clock me-2 text-primary" aria-hidden="true"></i>Khung giờ học tốt nhất của em</h2></div>
+    <div class="fg-card-header"><h2 class="fg-card-title" id="recoTitle">Khung giờ học tốt nhất của em</h2></div>
     <div class="fg-card-body" id="recoBody"></div>
   </section>
   <div class="fg-grid fg-grid-2">
     <section class="fg-card" aria-labelledby="compTitle">
-      <div class="fg-card-header"><h2 class="fg-card-title" id="compTitle"><i class="fa-solid fa-chart-simple me-2 text-primary" aria-hidden="true"></i>Điểm các phiên gần đây</h2></div>
+      <div class="fg-card-header"><h2 class="fg-card-title" id="compTitle">Điểm các phiên gần đây</h2></div>
       <div class="fg-card-body" id="compBody"></div>
     </section>
     <section class="fg-card" aria-labelledby="subjTitle">
-      <div class="fg-card-header"><h2 class="fg-card-title" id="subjTitle"><i class="fa-solid fa-book-open me-2 text-primary" aria-hidden="true"></i>Điểm trung bình theo môn</h2></div>
+      <div class="fg-card-header"><h2 class="fg-card-title" id="subjTitle">Điểm trung bình theo môn</h2></div>
       <div class="fg-card-body" id="subjBody"></div>
     </section>
   </div>
   <section class="fg-card" aria-labelledby="heatTitle">
     <div class="fg-card-header">
       <div>
-        <h2 class="fg-card-title" id="heatTitle"><i class="fa-solid fa-table-cells me-2 text-primary" aria-hidden="true"></i>Điểm trung bình theo giờ bắt đầu học</h2>
+        <h2 class="fg-card-title" id="heatTitle">Điểm trung bình theo giờ bắt đầu học</h2>
         <p class="fg-caption mb-0">Ô nét đứt là khung giờ chưa có phiên học nào.</p>
       </div>
     </div>

@@ -41,14 +41,16 @@
 
   function renderTracks() {
     const layer = $("trackOverlay"), d = S.data;
+    if ($("cameraFeed").hidden && $("cameraBox").classList.contains("is-expanded")) setExpanded(false);   // camera stopped
     if (!d || !d.camera_open || !d.tracks.length || !placeOverlay()) { layer.hidden = true; layer.innerHTML = ""; return; }
     layer.hidden = false;
+    const layerH = layer.clientHeight;
     const html = d.tracks.filter((t) => t.box).map((t) => {
-      const l = trackLabel(t), [x, y, w, h] = t.box;
+      const l = trackLabel(t), [x, y, w, h] = t.box, inside = y * layerH < 24;   // no room above the box for the tag
       return '<button type="button" class="fg-track" data-tone="' + l.tone + '" data-track="' + t.track_id + '"' +
         ' style="left:' + (x * 100) + "%;top:" + (y * 100) + "%;width:" + (w * 100) + "%;height:" + (h * 100) + '%"' +
         ' aria-label="Người #' + t.track_id + ": " + esc(l.text) + (t.enrolling ? ", đang tạo mẫu nhận diện" : "") + '">' +
-        '<span class="fg-track-tag"><i class="fa-solid ' + l.icon + '" aria-hidden="true"></i>#' + t.track_id + " " + esc(l.text) +
+        '<span class="fg-track-tag' + (inside ? " is-inside" : "") + '"><i class="fa-solid ' + l.icon + '" aria-hidden="true"></i>#' + t.track_id + " " + esc(l.text) +
         (t.enrolling ? ' <i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>' : "") + "</span></button>";
     }).join("");
     if (layer._sig !== html) { layer.innerHTML = html; layer._sig = html; }
@@ -111,6 +113,7 @@
   function refreshModal(first) {
     const t = trackById(S.track);
     if (!t) { $("tagCurrent").textContent = "Người #" + S.track + " không còn trong khung hình."; $("tagSave").disabled = true; return; }
+    $("tagSave").disabled = false;     // the person is (back) in the frame: a lost track must not lock the button
     $("tagTitle").textContent = "Người #" + t.track_id;
     $("tagCurrent").textContent = t.student_id
       ? "Hiện tại: " + t.student_name + " (" + (SOURCE[t.source] || "đã gắn") + ")" + (t.review_required ? " — AI thấy khuôn mặt giống học sinh khác, hãy kiểm tra lại." : "")
@@ -200,6 +203,27 @@
     FG.busy($("confirmSuggestBtn"), true, "Đang xác nhận…");
     try { const r = await FG.api("/api/teacher/classroom/confirm_suggestions", { body: { class_id: BOOT.class_id } }); FG.toast(r.message, "success"); await poll(); }
     catch (e) { FG.toast(e.message, "danger"); } finally { FG.busy($("confirmSuggestBtn"), false); }
+  });
+  /* ------------------------------------------------------- phóng to camera */
+  function setExpanded(on) {
+    const box = $("cameraBox"), btn = $("cameraExpand");
+    if (on === box.classList.contains("is-expanded")) return;
+    box.classList.toggle("is-expanded", on);
+    document.body.classList.toggle("fg-camera-open", on);
+    $("cameraBackdrop").hidden = !on;
+    btn.setAttribute("aria-pressed", String(on));
+    btn.setAttribute("aria-label", on ? "Thu nhỏ camera" : "Phóng to camera");
+    btn.querySelector("i").className = "fa-solid " + (on ? "fa-compress" : "fa-expand");
+    btn.querySelector("span").textContent = on ? "Thu nhỏ" : "Phóng to";
+    renderTracks();
+    btn.focus();
+  }
+  $("cameraExpand").addEventListener("click", () => setExpanded(!$("cameraBox").classList.contains("is-expanded")));
+  $("cameraBackdrop").addEventListener("click", () => setExpanded(false));
+  // a click on the picture (not on a person) enlarges it; persons stay clickable for tagging
+  $("cameraFeed").addEventListener("click", () => setExpanded(true));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("tagModal").classList.contains("show")) setExpanded(false);
   });
   window.addEventListener("resize", renderTracks);
   $("cameraFeed").addEventListener("load", renderTracks);

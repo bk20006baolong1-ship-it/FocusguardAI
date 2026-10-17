@@ -8,7 +8,6 @@ Có bốn vai trò: **Học sinh**, **Giáo viên**, **Phụ huynh**, **Quản t
 riêng tư và công cụ đánh giá lớp thật đã hoàn thành và kiểm chứng trực tiếp trên máy chủ đám mây; độ chính xác trên
 lớp học thật **chưa đo** (cần camera, lớp học, sự đồng ý và nhãn thực tế). Camera IP EZVIZ / RTSP / ONVIF đã được
 kiểm thử bằng camera mô phỏng, **chưa** thử trên camera EZVIZ thật: `EZVIZ_HARDWARE_VERIFICATION_PENDING`.
-Repo chính thức: `DKTECHVN/focusAI`.
 Bảng đối chiếu từng góp ý BTC với mã, test và bằng chứng: [docs/BTC_FEEDBACK_CLOSURE.md](docs/BTC_FEEDBACK_CLOSURE.md).
 
 > Trung thực về năng lực: các mô hình nhận dạng (YOLOv8, MediaPipe Face Landmarker, InsightFace) là mô hình
@@ -22,8 +21,7 @@ README này là điểm vào duy nhất. Mọi thư viện Python nằm trong c�
 trong `package.json` + `package-lock.json`: chỉ cần `pip install -r …` và `npm ci`, không cài gói lẻ.
 
 ```bash
-git clone https://github.com/DKTECHVN/focusAI
-cd focusAI
+cd FocusGuard                          # thư mục mã nguồn
 python3 -m venv .venv
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
 pip install -r requirements.txt        # ứng dụng + camera + mô hình AI + công cụ thực địa
@@ -31,6 +29,11 @@ cp .env.example .env                   # rồi thay các giá trị <placeholder
 python tools/download_models.py        # tải mô hình InsightFace (một lần)
 python app.py                          # http://127.0.0.1:5001
 ```
+
+**Camera:** chạy web xong, vào **Cài đặt › Camera › Tìm camera trong mạng LAN** (xem [Camera setup](#camera-setup-cài-đặt--camera)).
+FocusGuard dùng được mọi camera IP có **RTSP hoặc ONVIF** trong cùng mạng LAN, cùng webcam của máy chủ; **ưu tiên
+hỗ trợ camera IP EZVIZ** (bật RTSP trong ứng dụng EZVIZ trước). Camera chỉ xem qua đám mây không kết nối được. Không cần
+cài thêm thư viện camera: mọi thứ đã có trong `requirements.txt`. Danh sách đầy đủ: [Camera tương thích](#camera-tương-thích).
 
 ### Cần chuẩn bị ngoài pip (không phải thư viện Python)
 
@@ -75,9 +78,25 @@ Khi bắt đầu buổi học bằng camera lớp học, FocusGuard chọn: came
 hỏi chọn. Chưa lưu camera nào: dùng webcam 0 của máy chủ như trước. Mất tín hiệu camera: hệ thống tự kết nối lại,
 điểm tạm dừng, **không ai bị tính là rời chỗ hay vắng mặt** vì lỗi camera.
 
-**EZVIZ:** không phải mẫu / firmware EZVIZ nào cũng cho xem luồng trong mạng LAN (RTSP/ONVIF); một số chỉ xem được qua
-ứng dụng đám mây. FocusGuard **không** đăng nhập đám mây EZVIZ. Nếu camera trả lời nhưng không có luồng:
-“Camera không tương thích”. Hướng dẫn chi tiết, C1C/H1C, xử lý sự cố: [docs/IP_CAMERA_SETUP.md](docs/IP_CAMERA_SETUP.md).
+### Camera tương thích
+
+FocusGuard kết nối được **mọi camera IP phát luồng chuẩn RTSP hoặc ONVIF trong mạng LAN**, không phụ thuộc hãng, và
+webcam của máy chủ. Không dùng thư viện riêng của hãng nào: dò camera, RTSP và ONVIF được viết bằng thư viện chuẩn
+Python, video đọc bằng OpenCV (đã có trong `requirements.txt`).
+
+| Mức hỗ trợ | Camera | Cách dùng |
+|---|---|---|
+| **Ưu tiên: camera IP EZVIZ** | EZVIZ có bật RTSP / ONVIF (C1C, H1C… tùy firmware) | Tìm camera → tên `admin` + mã xác minh; tự thử đường dẫn EZVIZ (`/H.264`, `/Streaming/Channels/101`…); camera EZVIZ chưa bật RTSP được nhận ra và hiện hướng dẫn bật |
+| Có gợi ý theo hãng | Hikvision, Dahua, Imou, TP-Link (Tapo), Reolink | Tìm camera hoặc thêm thủ công; tự thử đường dẫn RTSP quen thuộc của hãng |
+| Chuẩn chung | Camera IP khác có RTSP / ONVIF | Tìm camera (RTSP cổng 554 hoặc ONVIF); RTSP cổng khác: **Thêm camera thủ công** (IP, cổng, đường dẫn) |
+| Không kết nối được | Camera **chỉ xem qua đám mây** (không có RTSP / ONVIF trong LAN), camera ở mạng khác / Wi-Fi khách, camera chỉ nhận mật khẩu trong đường dẫn | Bật RTSP / ONVIF trong ứng dụng của hãng nếu có, hoặc dùng camera khác |
+
+**Camera EZVIZ:** bật luồng LAN trước — ứng dụng EZVIZ › Cài đặt › Xem trực tiếp qua LAN (LAN Live View) › chọn
+camera › ⚙️ › Cài đặt dịch vụ cục bộ (Local Service Settings) › bật **RTSP**. Không phải mẫu / firmware EZVIZ nào cũng
+có mục này; trang thông số H1C chỉ ghi giao thức đám mây EZVIZ. FocusGuard **không** đăng nhập đám mây EZVIZ, nên camera
+không có luồng LAN hiện “Camera không tương thích”. Hỗ trợ EZVIZ đã kiểm thử bằng camera mô phỏng, **chưa** kiểm chứng
+trên camera EZVIZ thật (`EZVIZ_HARDWARE_VERIFICATION_PENDING`). Hướng dẫn chi tiết, C1C/H1C, xử lý sự cố:
+[docs/IP_CAMERA_SETUP.md](docs/IP_CAMERA_SETUP.md).
 
 Bảo mật: mật khẩu / mã xác minh được mã hóa (`FG_CAMERA_CREDENTIAL_KEY`), không bao giờ hiện lại hay ghi nhật ký;
 chỉ kết nối tới **mạng camera được phép** và cổng camera (RTSP / ONVIF): `FG_CAMERA_ALLOWED_NETWORKS` (ví dụ
@@ -133,8 +152,7 @@ bash scripts/ci_check.sh
 compile → import → pytest → cú pháp JS → quét bảo mật/public repo + dependency → đánh giá SYNTHETIC → gói đánh giá
 cloud (REPLAY, nhiều người, benchmark, hiệu chỉnh) → kiểm tra quyền riêng tư của báo cáo → `CI CHECK: PASS`.
 
-Đây là cổng kiểm chứng chính thức, chạy trực tiếp trong môi trường sạch (clone mới, venv mới). GitHub Actions **không**
-được dùng làm cổng kiểm chứng; `.github/workflows/*.yml` chỉ giữ làm tài liệu tham khảo cho cùng các bước.
+Đây là cổng kiểm chứng chính thức, chạy trực tiếp trong môi trường sạch (bản mã nguồn mới, venv mới).
 
 Test phần cứng (`tests/hardware/`) mặc định **SKIPPED: HARDWARE_REQUIRED**; trên máy có webcam:
 
@@ -249,8 +267,8 @@ consent và ground truth.
 * Firestore production (Cloud): chưa kiểm tra.
 
 **Hạn chế đã biết**
-* Repo `DKTECHVN/focusAI` bắt đầu từ snapshot sạch; repo cũ trước khi chuyển vẫn còn tài sản nhạy cảm trong lịch sử
-  (ảnh khuôn mặt, export emulator, `.env` cũ, khoá giả của emulator) — xem `docs/PRIVACY_AND_AI_SAFETY.md`.
+* Mã nguồn hiện tại bắt đầu từ snapshot sạch; các bản lưu trữ cũ trước đó còn tài sản nhạy cảm (ảnh khuôn mặt,
+  export emulator, `.env` cũ, khoá giả của emulator) — xem `docs/PRIVACY_AND_AI_SAFETY.md`.
 * Heuristic EAR không phân biệt nhắm mắt với nhìn xuống rất thấp; YOLOv8n phát hiện điện thoại với độ tin cậy dao động.
 * Trên macOS, lệnh cần camera phải chạy từ Terminal.app (quyền Camera).
 * Camera chỉ phân tích khi trang Giám sát (giáo viên) hoặc Phiên học (học sinh) đang mở; giao diện có nhắc điều này.

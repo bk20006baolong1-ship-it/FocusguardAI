@@ -7,6 +7,7 @@
   DESCRIBE with Digest auth, so the real RTSP probe / easy-connect code is
   exercised over a real socket.
 * :func:`mock_discovery_strategy` — adds a fixed device to a discovery job.
+* :func:`mock_rtsp_disabled_strategy` — adds an SDK-port-only device (RTSP off).
 """
 import hashlib
 import re
@@ -181,4 +182,16 @@ def mock_discovery_strategy(host, vendor="EZVIZ", model="CS-H1C", name="EZVIZ H1
             return
         ctx.job.add(host, protocols=["ONVIF", "RTSP"], vendor=vendor, model=model, device_name=name,
                     suggested_port=554, confidence="high", auth_required=auth_required, _hint=vendor)
+    return strategy
+
+
+def mock_rtsp_disabled_strategy(host):
+    """Adds a device that answers only on the SDK port 8000 (an EZVIZ camera with RTSP off)."""
+    def strategy(ctx):
+        from .netguard import ORIGIN_DISCOVERED, HostNotAllowed
+        try:
+            ctx.netguard.check_ip(host, ORIGIN_DISCOVERED)
+        except HostNotAllowed:
+            return
+        ctx.job.add(host, protocols=["SDK"], confidence="low")
     return strategy

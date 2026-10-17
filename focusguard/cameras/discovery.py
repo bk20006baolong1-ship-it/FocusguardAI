@@ -13,7 +13,12 @@ can be stopped. Strategies, in order:
    the machine's OWN approved camera subnet(s) (``NetGuard.scan_networks``: the
    local /24, narrowed to FG_CAMERA_ALLOWED_NETWORKS when configured) — at most
    2 subnets (508 hosts), 48 parallel connections, 0.4 s timeout each; hosts with
-   RTSP get an OPTIONS/DESCRIBE probe without credentials ("needs authentication?").
+   RTSP get an OPTIONS/DESCRIBE probe without credentials ("needs authentication?");
+5. diagnosis only: hosts whose 554 is closed get one more TCP connect to 8000 (the
+   Hikvision/EZVIZ SDK port, also a camera port) once every RTSP probe is done. A host
+   with 8000 open is reported as RTSP_DISABLED ("maybe an EZVIZ/Hikvision camera whose
+   RTSP is off") so the teacher knows to enable RTSP in the vendor app; it is never
+   connectable (FocusGuard does not use the vendor SDK or cloud).
 
 mDNS is not used (it would add a dependency and cameras rarely announce video
 over it). Only addresses that pass the camera-network policy (origin DISCOVERED)
@@ -37,8 +42,11 @@ from .netguard import ORIGIN_DISCOVERED, HostNotAllowed, local_interface_ips
 
 RUNNING, DONE, STOPPED = "RUNNING", "DONE", "STOPPED"
 ST_AUTH_REQUIRED, ST_CONNECTABLE, ST_INCOMPATIBLE = "AUTH_REQUIRED", "CONNECTABLE", "NO_COMPATIBLE_STREAM"
+ST_RTSP_DISABLED = "RTSP_DISABLED"
 STATUS_LABELS_VI = {ST_AUTH_REQUIRED: "Cần xác thực", ST_CONNECTABLE: "Có thể kết nối",
-                    ST_INCOMPATIBLE: "Camera không tương thích"}
+                    ST_INCOMPATIBLE: "Camera không tương thích",
+                    ST_RTSP_DISABLED: "Có thể là camera EZVIZ/Hikvision — chưa bật RTSP"}
+SDK_PORT = 8000                    # Hikvision/EZVIZ SDK port: a vendor hint / diagnosis, never a video source
 MAX_SUBNETS = 2
 SCAN_WORKERS = 48
 CONNECT_TIMEOUT = 0.4
@@ -66,6 +74,12 @@ def neighbour_ips(reader=None):
     except (OSError, subprocess.SubprocessError):
         return []
     return sorted(set(_ARP_RX.findall(text)))
+
+
+def rtsp_disabled(result):
+    """Only the SDK port answered (no RTSP / ONVIF): a diagnosis result, never connectable."""
+    protocols = set(result.get("protocols_detected") or [])
+    return "SDK" in protocols and not ({"RTSP", "ONVIF"} & protocols)
 
 
 class Result(dict):
@@ -110,7 +124,9 @@ class DiscoveryJob:
         with self.lock:
             items = []
             for r in self.results.values():
-                if not ({"RTSP", "ONVIF"} & set(r["protocols_detected"])):
+                if rtsp_disabled(r):
+                    status = ST_RTSP_DISABLED
+                elif not ({"RTSP", "ONVIF"} & set(r["protocols_detected"])):
                     status = ST_INCOMPATIBLE
                 elif r["auth_required"] is False:
                     status = ST_CONNECTABLE
@@ -119,7 +135,7 @@ class DiscoveryJob:
                 items.append({k: v for k, v in r.items() if not k.startswith("_")} |
                              {"status": status, "status_label": STATUS_LABELS_VI[status],
                               "display_name": r["device_name"] or (" ".join(x for x in (r["vendor"], r["model"]) if x))
-                              or "Camera IP"})
+                              or ("Thiết bị chưa rõ" if status == ST_RTSP_DISABLED else "Camera IP")})
         items.sort(key=lambda x: ({"high": 0, "medium": 1, "low": 2}[x["confidence"]], _ip_key(x["host"])))
         return {"job_id": self.job_id, "status": self.status, "stage": self.stage, "count": len(items),
                 "started_at": self.started_at, "finished_at": self.finished_at, "timeout_seconds": self.timeout,
@@ -186,7 +202,7 @@ def strategy_ssdp(ctx):
 
 
 def strategy_lan_scan(ctx):
-    """ARP neighbours first, then the local /24(s); RTSP port only."""
+    """ARP neighbours first, then the local /24(s); RTSP port, then (diagnosis) the SDK port."""
     ctx.job.stage = "Đang dò các thiết bị trong mạng LAN…"
     hosts, seen = [], set(ctx.local_ips)
     scan_nets = ctx.netguard.scan_networks(ctx.local_ips)[:MAX_SUBNETS]
@@ -217,33 +233,51 @@ def strategy_lan_scan(ctx):
             return False
     if not port_ok(554):
         return                             # RTSP's port is not a camera port here: nothing to scan
-    probe_sdk = port_ok(8000)
+    probe_sdk = port_ok(SDK_PORT)
 
     def scan(ip):
+        """True when 554 is closed (the host is a candidate for the SDK-port diagnosis)."""
         if ctx.stopped():
-            return
-        if ctx.connect(ip, 554):
-            status, server = ctx.rtsp_options(ip, 554)
-            if status == rtsp.UNREACHABLE:
-                return
-            probe = ctx.rtsp_probe(ip, 554, "/")
-            sdk_port = ctx.connect(ip, 8000) if probe_sdk else False
-            vendor = detect_vendor(server, probe.server) or ctx.ssdp_hints.get(ip)
-            ctx.job.add(ip, protocols=["RTSP"], vendor=vendor, suggested_port=554, confidence="medium",
-                        auth_required=probe.status in (rtsp.AUTH_REQUIRED,) or (None if probe.status != rtsp.OK
-                                                                                 else False),
-                        _hint=vendor or ("EZVIZ" if sdk_port else None))
+            return False
+        if not ctx.connect(ip, 554):
+            return True
+        status, server = ctx.rtsp_options(ip, 554)
+        if status == rtsp.UNREACHABLE:
+            return False
+        probe = ctx.rtsp_probe(ip, 554, "/")
+        sdk_port = ctx.connect(ip, SDK_PORT) if probe_sdk else False
+        vendor = detect_vendor(server, probe.server) or ctx.ssdp_hints.get(ip)
+        ctx.job.add(ip, protocols=["RTSP"], vendor=vendor, suggested_port=554, confidence="medium",
+                    auth_required=probe.status in (rtsp.AUTH_REQUIRED,) or (None if probe.status != rtsp.OK
+                                                                             else False),
+                    _hint=vendor or ("EZVIZ" if sdk_port else None))
+        return False
 
-    pool = ThreadPoolExecutor(max_workers=SCAN_WORKERS)
-    try:
-        futures = [pool.submit(scan, h) for h in hosts]
-        for f in futures:
+    def scan_sdk(ip):
+        # 554 closed, 8000 open: typically an EZVIZ/Hikvision camera with RTSP ("Local Service
+        # Settings") disabled. Reported for diagnosis only: no protocol talk, never connectable.
+        if not ctx.stopped() and ctx.connect(ip, SDK_PORT):
+            ctx.job.add(ip, protocols=["SDK"], confidence="low")
+        return False
+
+    def run(fn, items):
+        futures = [(h, pool.submit(fn, h)) for h in items]
+        flagged = []
+        for h, f in futures:
             if ctx.stopped():
                 break
             try:
-                f.result(timeout=max(0.05, ctx.remaining()))
+                if f.result(timeout=max(0.05, ctx.remaining())):
+                    flagged.append(h)
             except Exception:
                 continue
+        return flagged
+
+    pool = ThreadPoolExecutor(max_workers=SCAN_WORKERS)
+    try:
+        rtsp_closed = run(scan, hosts)         # every RTSP probe first: real cameras win the time budget
+        if probe_sdk and rtsp_closed and not ctx.stopped():
+            run(scan_sdk, rtsp_closed)
     finally:
         # never wait for a straggler: the job finishes on time (stragglers end on their own
         # bounded socket deadlines; a late result just joins the finished job)
