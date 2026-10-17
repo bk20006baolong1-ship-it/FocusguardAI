@@ -53,7 +53,19 @@
     init() {
       $("startBtn").addEventListener("click", dashboard.start);
       $("stopBtn").addEventListener("click", dashboard.stop);
-      $("cameraFeed").addEventListener("error", () => { if (dashboard.camera.src) { dashboard.camera.error = true; dashboard.renderCamera(); } });
+      $("cameraFeed").addEventListener("error", () => {
+        if (dashboard.data && dashboard.data.is_active && dashboard.camera.src) {
+          dashboard.camera.error = true;
+          dashboard.renderCamera();
+        }
+      });
+      $("cameraFeed").addEventListener("load", () => {
+        dashboard.camera.error = false;
+        if (dashboard.data && dashboard.data.is_active) {
+          $("cameraFeed").hidden = false;
+          $("cameraState").hidden = true;
+        }
+      });
       $("cameraState").addEventListener("click", (e) => { if (e.target.closest("[data-camera-retry]")) dashboard.cameraRestart(); });
       document.addEventListener("fg:theme", () => { FG.chartDefaults(); if (dashboard.chart) { dashboard.chart.destroy(); dashboard.chart = null; dashboard.renderChart(); } });
       document.addEventListener("visibilitychange", () => {
@@ -218,6 +230,11 @@
       }
       switch (c.state) {
         case "ACTIVE":
+          if (cam.error || !cam.src || !feed.src) {
+            cam.error = false;
+            cam.src = true;
+            feed.src = "/video_feed?t=" + Date.now();
+          }
           feed.hidden = false; overlay.hidden = true; overlay._sig = null;
           setBadge("success", "fa-video", "Đang hoạt động");
           break;
