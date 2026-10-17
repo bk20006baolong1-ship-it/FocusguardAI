@@ -207,7 +207,19 @@
       $("studentGrid").addEventListener("click", openPanelFromEvent);
       $("attentionList").addEventListener("click", openPanelFromEvent);
       const feed = $("cameraFeed");
-      feed.addEventListener("error", () => { if (S.camera.src) { S.camera.error = true; dashboard.camera(); } });
+      feed.addEventListener("error", () => {
+        if (S.data && S.data.class_session_active && S.camera.src) {
+          S.camera.error = true;
+          dashboard.camera();
+        }
+      });
+      feed.addEventListener("load", () => {
+        S.camera.error = false;
+        if (S.data && S.data.class_session_active && S.data.mode === "classroom") {
+          feed.hidden = false;
+          $("cameraState").hidden = true;
+        }
+      });
       $("cameraState").addEventListener("click", (e) => { if (e.target.closest("[data-camera-retry]")) dashboard.cameraRestart(); });
       FG.skeleton($("attentionList"), 2);
       FG.skeleton($("studentGrid"), 3);
@@ -454,6 +466,11 @@
           show("", cam.label, cam.help, null, true);
           break;
         case "ACTIVE":
+          if (S.camera.error || !S.camera.src || !feed.src) {
+            S.camera.error = false;
+            S.camera.src = true;
+            feed.src = "/video_feed" + classQuery("&mode=classroom&t=" + Date.now());
+          }
           feed.hidden = false; overlay.hidden = true; overlay._sig = null;
           setBadge("success", "fa-video", "Đang hoạt động");
           break;
@@ -506,6 +523,8 @@
         if (S.mode === "classroom" && $("initFirst") && $("initFirst").checked) body.initialize = true;
         const res = await FG.api(url, { body });
         FG.toast(res.already_active ? "Buổi học đã được bắt đầu trước đó." : "Đã bắt đầu buổi học.", res.already_active ? "info" : "success");
+        S.camera.error = false;
+        S.camera.src = false;
         await load();
       } catch (e) {
         FG.toast(e.message, "danger");
